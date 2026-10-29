@@ -8,8 +8,9 @@ import pg from 'pg';
 
 const url = process.env.DATABASE_URL ?? process.env.DATABASE_URL_ADMIN;
 if (!url) {
-  console.error('[migrate] DATABASE_URL não definida. Crie um Postgres no Render e ligue a "Internal Database URL" a DATABASE_URL.');
-  process.exit(1);
+  // Não trava o deploy: o site sobe, mas rotas que usam o banco vão falhar até configurar.
+  console.warn('[migrate] DATABASE_URL não definida: migrações puladas. Crie um Postgres no Render e ligue a "Internal Database URL" a DATABASE_URL.');
+  process.exit(0);
 }
 
 const dir = path.resolve(process.env.MIGRATIONS_DIR ?? 'db/migrations');
