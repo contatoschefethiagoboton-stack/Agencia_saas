@@ -12,6 +12,7 @@ import Negocio from './cliente/Negocio';
 import ApprovalQueue from './cliente/ApprovalQueue';
 import Inbox from './cliente/Inbox';
 import Conexoes from './cliente/Conexoes';
+import Marca from './cliente/Marca';
 import './ui/forms.css';
 
 const useHash = (fallback: string) => {
@@ -25,7 +26,7 @@ const navDono: NavItem[] = [
   { href: '#master-financeiro', label: 'Tesouraria' }, { href: '#master-seguranca', label: 'Segurança e auditoria' },
 ];
 const navCliente: NavItem[] = [
-  { href: '#cliente', label: 'Painel' }, { href: '#negocio', label: 'Meu negócio' },
+  { href: '#cliente', label: 'Painel' }, { href: '#negocio', label: 'Meu negócio' }, { href: '#marca', label: 'Identidade visual' },
   { href: '#aprovacoes', label: 'Aprovações' }, { href: '#atendimento', label: 'Atendimento WhatsApp' },
   { href: '#conexoes', label: 'Conexões' },
 ];
@@ -67,6 +68,7 @@ function AreaCliente({ me, logout }: { me: Me; logout: () => void }) {
     <Shell brand={me.tenant_name ?? 'Meu negócio'} sub={me.city ?? me.email} logo={initials} logoColor="var(--teal)"
            nav={navCliente} current={hash} flush={hash === '#atendimento'}>
       {hash === '#aprovacoes' ? <ApprovalQueue /> : hash === '#atendimento' ? <Inbox /> : hash === '#negocio' ? <Negocio />
+        : hash === '#marca' ? <Marca />
         : hash === '#conexoes' ? <Conexoes query={query} isOwner={me.role === 'owner'} /> : <Resumo me={me} />}
       {hash !== '#atendimento' && <div className="actions"><button className="btn" onClick={logout}>Sair</button></div>}
     </Shell>

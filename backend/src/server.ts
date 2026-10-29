@@ -13,6 +13,7 @@ import { requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { clientRouter, approvalsRouter } from './client/routes.js';
 import { metaCallbackRouter } from './integrations/meta/oauth.js';
+import { servicePool } from './db.js';
 
 const app = express();
 app.set('trust proxy', 1);                   // atrás do proxy do Render/Cloudflare
@@ -22,9 +23,18 @@ app.use(cookieParser());
 const rawBody = (req: any, _res: unknown, buf: Buffer) => { req.rawBody = buf; };
 const jsonSmall = express.json({ limit: '1mb', verify: rawBody });
 const jsonLarge = express.json({ limit: '15mb' });                 // só para o PDF do onboarding
-app.use((req, res, next) => (req.path === '/api/client/dossier/ingest' ? jsonLarge : jsonSmall)(req, res, next));
+const LARGE = new Set(['/api/client/dossier/ingest', '/api/client/media']);   // PDF do onboarding e fotos/logo
+app.use((req, res, next) => (LARGE.has(req.path) ? jsonLarge : jsonSmall)(req, res, next));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));   // health check do Render
+
+// Artes públicas: o Instagram/Facebook buscam a imagem por este link. Só artes (nunca fotos ou logos enviados).
+app.get('/media/:id.jpg', async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).end();
+  const m = (await servicePool.query('SELECT mime, bytes FROM media_public($1)', [req.params.id])).rows[0];
+  if (!m) return res.status(404).end();
+  res.set({ 'Cache-Control': 'public, max-age=31536000, immutable', 'Cross-Origin-Resource-Policy': 'cross-origin' }).type(m.mime).send(m.bytes);
+});
 
 app.use('/webhooks/pagamentos', webhookRouter);   // sem sessão; protegidos por assinatura
 app.use('/webhooks/whatsapp', waWebhookRouter);    // Meta (HMAC) e Twilio (assinatura)

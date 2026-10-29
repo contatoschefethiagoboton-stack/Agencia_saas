@@ -7,8 +7,10 @@ interface Item {
   id: string; channel: string; kind: string; scheduled_for: string; status: string; feedback: string | null; revision: number;
   error: string | null; permalink: string | null; published_at: string | null;
   payload: { caption: string; hashtags?: string[]; slides?: string[]; script?: string; trigger?: string; template?: string;
-             imagePrompt?: string; image_url?: string; images?: string[] };
+             imagePrompt?: string; image_url?: string; images?: string[]; art?: { template: string; photoId: string | null; generated: boolean } };
 }
+const MODELOS: [string, string][] = [['destaque', 'Destaque'], ['oferta', 'Oferta'], ['bastidores', 'Bastidores'],
+  ['dica', 'Dica'], ['depoimento', 'Depoimento'], ['carrossel', 'Carrossel']];
 
 const channelName: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', google_business: 'Google' };
 const kindName: Record<string, string> = { post: 'Post', carousel: 'Carrossel', reel_script: 'Vídeo curto', story: 'Story', gbp_post: 'Post do Google' };
@@ -21,6 +23,7 @@ const imagesOf = (p: Item['payload']) => p.images?.length ? p.images : p.image_u
 export default function ApprovalQueue() {
   const month = new Date().toISOString().slice(0, 7);
   const { data: items, error, reload } = useLoad<Item[]>(`/client/content?month=${month}`);
+  const { data: photos } = useLoad<{ id: string }[]>('/client/media?kind=photo');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState('');
 
@@ -56,6 +59,20 @@ export default function ApprovalQueue() {
     finally { setBusy(''); }
   }
 
+  async function makeArt(id: string, body: { template?: string; photoId?: string | null }) {
+    setBusy(id); setMsg(null);
+    try { await api(`/approvals/${id}/art`, { body }); reload(); }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(''); }
+  }
+
+  async function artsAll() {
+    setBusy('arts'); setMsg(null);
+    try { const r = await api('/client/content/arts', { body: { month } }); setMsg({ kind: 'ok', text: `${r.geradas} artes geradas.` }); reload(); }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(''); }
+  }
+
   async function approveAll() {
     setBusy('all');
     try { const r = await api('/approvals/approve-all', { body: {} }); setMsg({ kind: 'ok', text: `${r.aprovados} conteúdos aprovados.` }); reload(); }
@@ -66,13 +83,17 @@ export default function ApprovalQueue() {
   if (error) return <p className="msg err" role="alert">{error}</p>;
   if (!items) return <p className="aq-msg">Carregando…</p>;
   const pend = items.filter(i => i.status === 'pending_approval').length;
+  const semArte = items.filter(i => AUTO(i) && !imagesOf(i.payload).length && !['published', 'publishing', 'rejected'].includes(i.status)).length;
 
   return (
     <>
       <header className="page-head">
         <div><span className="eyebrow">{new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</span><h1>Aprovações</h1></div>
-        {pend > 0 && <button className="btn btn-primary" disabled={Boolean(busy)} onClick={approveAll}>
-          {busy === 'all' ? 'Aprovando…' : `Aprovar tudo (${pend})`}</button>}
+        <div className="actions">
+          {semArte > 0 && <button className="btn" disabled={Boolean(busy)} onClick={artsAll}>{busy === 'arts' ? 'Gerando artes…' : `Gerar artes (${semArte})`}</button>}
+          {pend > 0 && <button className="btn btn-primary" disabled={Boolean(busy)} onClick={approveAll}>
+            {busy === 'all' ? 'Aprovando…' : `Aprovar tudo (${pend})`}</button>}
+        </div>
       </header>
       {msg && <p className={`msg ${msg.kind}`} role="status">{msg.text}</p>}
       {!items.length && <p className="banner">Nenhum conteúdo neste mês ainda. Em <a href="#negocio">Meu negócio</a>, clique em "Gerar calendário".</p>}
@@ -84,7 +105,7 @@ export default function ApprovalQueue() {
             <section key={title} className="kanban-col" aria-label={title}>
               <h2>{title} <span className="badge">{col.length}</span></h2>
               {col.map(it => <Card key={it.id} it={it} busy={busy === it.id} onDecide={decide} onRetry={retry}
-                                     onPublishRetry={publishRetry} onMedia={saveMedia} />)}
+                                     onPublishRetry={publishRetry} onMedia={saveMedia} onArt={makeArt} photos={photos ?? []} />)}
             </section>
           );
         })}
@@ -93,15 +114,16 @@ export default function ApprovalQueue() {
   );
 }
 
-function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia }: { it: Item; busy: boolean; onRetry: (id: string) => void;
+function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia, onArt, photos }: { it: Item; busy: boolean; onRetry: (id: string) => void;
   onPublishRetry: (id: string) => void; onMedia: (id: string, images: string[]) => void;
+  onArt: (id: string, b: { template?: string; photoId?: string | null }) => void; photos: { id: string }[];
   onDecide: (id: string, d: 'approve' | 'reject' | 'changes', f?: string) => void }) {
   const [asking, setAsking] = useState(false);
   const [fb, setFb] = useState('');
   const p = it.payload;
   const imgs = imagesOf(p);
   const [editImg, setEditImg] = useState(false);
-  const [imgText, setImgText] = useState(imgs.join('\n'));
+  const [imgText, setImgText] = useState(p.art?.generated ? '' : imgs.join('\n'));
   const editable = ['pending_approval', 'changes_requested', 'approved', 'failed'].includes(it.status);
   return (
     <article className="aq-card" style={{ margin: 0 }}>
@@ -115,22 +137,40 @@ function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia }: { it: It
       {p.hashtags?.length ? <p className="aq-tags">{p.hashtags.join(' ')}</p> : null}
 
       {imgs.length > 0 && <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
-        {imgs.map(u => <img key={u} src={u} alt="Arte do post" style={{ width: 88, height: 88, objectFit: 'cover', borderRadius: 8 }} />)}</div>}
+        {imgs.map((u, i) => <a key={u} href={u} target="_blank" rel="noreferrer" aria-label={`Abrir arte ${i + 1} em tamanho real`}>
+          <img src={u} alt={`Arte ${i + 1}`} style={{ width: imgs.length > 1 ? 120 : '100%', maxWidth: 360, aspectRatio: it.kind === 'story' ? '9 / 16' : '4 / 5', objectFit: 'cover', borderRadius: 10, display: 'block' }} /></a>)}</div>}
       {AUTO(it) && editable && (editImg ? (
         <form onSubmit={e => { e.preventDefault(); onMedia(it.id, imgText.split(/\s+/).filter(Boolean)); setEditImg(false); }} style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-          <label className="field">Link da arte (um por linha; até 10 para carrossel)
+          <label className="field">Link da sua própria arte (um por linha; até 10 para carrossel)
             <textarea value={imgText} onChange={e => setImgText(e.target.value)} placeholder="https://…/arte.jpg" /></label>
-          {p.imagePrompt && <small className="card-sub">Sugestão de arte: {p.imagePrompt}</small>}
           <div className="aq-actions" style={{ marginTop: 0 }}>
             <button type="button" className="btn" onClick={() => setEditImg(false)}>Cancelar</button>
-            <button className="btn btn-primary" disabled={busy}>Salvar arte</button></div>
+            <button className="btn btn-primary" disabled={busy}>Usar este link</button></div>
         </form>
-      ) : <button className="btn" style={{ marginTop: 8 }} onClick={() => setEditImg(true)}>
-            {imgs.length ? 'Trocar arte' : it.channel === 'instagram' ? 'Adicionar arte (obrigatória no Instagram)' : 'Adicionar arte'}</button>)}
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
+          {it.kind !== 'carousel' && (
+            <select aria-label="Modelo da arte" disabled={busy} value={p.art?.template ?? ''}
+                    onChange={e => onArt(it.id, { template: e.target.value, photoId: p.art?.photoId ?? undefined })}
+                    style={{ background: 'var(--card-2)', border: '1px solid var(--border-strong)', borderRadius: 10, minHeight: 44, padding: '0 10px' }}>
+              {!p.art && <option value="">Modelo…</option>}
+              {MODELOS.filter(([m]) => m !== 'carrossel').map(([m, n]) => <option key={m} value={m}>{n}</option>)}
+            </select>)}
+          {photos.length > 0 && p.art && ['oferta', 'bastidores', 'destaque'].includes(p.art.template) && (
+            <select aria-label="Foto da arte" disabled={busy} value={p.art.photoId ?? 'none'}
+                    onChange={e => onArt(it.id, { photoId: e.target.value === 'none' ? null : e.target.value })}
+                    style={{ background: 'var(--card-2)', border: '1px solid var(--border-strong)', borderRadius: 10, minHeight: 44, padding: '0 10px' }}>
+              <option value="none">Sem foto</option>
+              {photos.map((ph, i) => <option key={ph.id} value={ph.id}>Foto {i + 1}</option>)}
+            </select>)}
+          <button className="btn" disabled={busy} onClick={() => onArt(it.id, {})}>{busy ? 'Gerando…' : imgs.length ? 'Refazer arte' : 'Gerar arte'}</button>
+          <button className="btn" disabled={busy} onClick={() => setEditImg(true)}>Usar link próprio</button>
+        </div>
+      ))}
 
       {it.status === 'approved' && !AUTO(it) && <p className="card-sub">{it.kind === 'reel_script' ? 'Roteiro para você gravar e postar.' : 'Publicação neste canal ainda é manual.'}</p>}
       {it.status === 'approved' && AUTO(it) && (it.channel === 'instagram' && !imgs.length
-        ? <p className="msg warn">Sem arte, o Instagram não aceita a publicação. Adicione o link da imagem.</p>
+        ? <p className="msg warn">Sem arte, o Instagram não aceita a publicação. Clique em "Gerar arte".</p>
         : <p className="card-sub">Será publicado automaticamente no horário.</p>)}
       {it.status === 'publishing' && <span className="badge warn">Publicando…</span>}
       {it.status === 'failed' && <>

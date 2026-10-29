@@ -51,7 +51,7 @@ export default function Negocio() {
 
   const generate = () => run('gen', async () => {
     const r = await api('/client/content/generate', { body: { month } });
-    return `${r.criados} conteúdos criados para este mês. Eles estão em Aprovações esperando o seu OK.`;
+    return `${r.criados} conteúdos criados para este mês${r.artes ? `, com ${r.artes} artes prontas` : ''}. Eles estão em Aprovações esperando o seu OK.`;
   });
 
   if (!d) return msg ? <p className={`msg ${msg.kind}`}>{msg.text}</p> : <p className="card-sub">Carregando…</p>;

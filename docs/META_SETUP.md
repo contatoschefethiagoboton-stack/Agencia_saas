@@ -46,6 +46,6 @@ A Meta pede: **verificação da empresa** (CNPJ), **política de privacidade** p
   O token de anúncios dura ~60 dias: o painel mostra até quando, e o cliente clica em **Reconectar**.
 - O publicador roda a cada 30 s e publica só itens **aprovados** cujo horário chegou. Falha nunca é repetida sozinha
   (para não duplicar post): o cliente vê o motivo e clica em **Tentar de novo**.
-- **Instagram exige imagem.** Enquanto a geração automática de artes não está pronta, o cliente cola o link da arte
-  (Canva → Compartilhar → link público da imagem JPG, ou qualquer endereço `https` de imagem) no card do conteúdo.
+- **Instagram exige imagem.** A plataforma gera as artes (JPG) junto com o calendário e as serve em `/media/<id>.jpg`,
+  que a Meta busca na hora de publicar. O cliente também pode usar um link próprio de imagem `https`.
 - O **Modo Pânico** bloqueia publicação, novas conexões e chamadas à Meta (pausar campanha continua permitido).

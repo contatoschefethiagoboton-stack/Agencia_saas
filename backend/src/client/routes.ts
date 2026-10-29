@@ -7,6 +7,8 @@ import { htmlToText, safeFetchText } from '../security/safeFetch.js';
 import { metaConnectRouter } from '../integrations/meta/oauth.js';
 import { clientMetrics } from '../integrations/meta/insights.js';
 import { redis } from '../redis.js';
+import { generateArt, generateArtsForMonth, previewArt, TEMPLATES } from '../art/service.js';
+import { imageInfo } from '../art/render.js';
 
 /** Painel do negócio. Tudo passa por withTenant: o RLS garante que um cliente nunca vê dados de outro. */
 export const clientRouter = Router();
@@ -61,6 +63,74 @@ clientRouter.get('/metrics', async (req, res) => {
   res.json(await clientMetrics(tid(req), days));
 });
 
+// ---------- Identidade visual e biblioteca de fotos ----------
+const MAX_UPLOAD = 5 * 1024 * 1024;
+clientRouter.get('/media', async (req, res) => {
+  const kind = z.enum(['photo', 'logo', 'art']).default('photo').parse(req.query.kind);
+  res.json(await withTenant(tid(req), async c => (await c.query(
+    `SELECT id, kind, width, height, created_at FROM media WHERE kind = $1 ORDER BY created_at DESC LIMIT 200`, [kind])).rows));
+});
+
+clientRouter.get('/media/:id/raw', async (req, res) => {
+  const m = await withTenant(tid(req), async c => (await c.query(`SELECT mime, bytes FROM media WHERE id = $1`,
+                                                                  [z.string().uuid().parse(req.params.id)])).rows[0]);
+  if (!m) return res.status(404).end();
+  res.set('Cache-Control', 'private, max-age=86400').type(m.mime).send(m.bytes);
+});
+
+clientRouter.post('/media', async (req, res) => {
+  const b = z.object({ kind: z.enum(['photo', 'logo']), dataBase64: z.string().max(7_200_000) }).parse(req.body);
+  const bytes = Buffer.from(b.dataBase64, 'base64');
+  if (bytes.length > MAX_UPLOAD) return res.status(413).json({ error: 'A imagem precisa ter até 5 MB' });
+  const info = imageInfo(bytes);
+  if (!info) return res.status(400).json({ error: 'Envie uma imagem JPG ou PNG' });
+  if (info.width < 200 || info.height < 200 || info.width > 8000 || info.height > 8000)
+    return res.status(400).json({ error: 'Imagem pequena ou grande demais (mínimo 200 px)' });
+  const id = await withTenant(tid(req), async c => {
+    if (b.kind === 'photo' && (await c.query(`SELECT count(*)::int AS n FROM media WHERE kind = 'photo'`)).rows[0].n >= 80)
+      throw Object.assign(new Error('Limite de 80 fotos. Apague algumas antes de enviar mais.'), { status: 409 });
+    if (b.kind === 'logo') await c.query(`DELETE FROM media WHERE kind = 'logo'`);
+    const r = await c.query(`INSERT INTO media (tenant_id, kind, mime, bytes, width, height) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                            [tid(req), b.kind, info.mime, bytes, info.width, info.height]);
+    if (b.kind === 'logo') await c.query(`UPDATE business_dossier SET data = jsonb_set(data, '{marca}', coalesce(data->'marca', '{}') || jsonb_build_object('logoId', $2::text))
+                                          WHERE tenant_id = $1`, [tid(req), r.rows[0].id]);
+    await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: `media.${b.kind}_uploaded` }, c);
+    return r.rows[0].id;
+  });
+  res.status(201).json({ id });
+});
+
+clientRouter.delete('/media/:id', async (req, res) => {
+  await withTenant(tid(req), c => c.query(`DELETE FROM media WHERE id = $1 AND kind IN ('photo', 'logo')`,
+                                          [z.string().uuid().parse(req.params.id)]));
+  res.json({ ok: true });
+});
+
+clientRouter.put('/brand', async (req, res) => {
+  const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+  const b = z.object({ primaria: color, secundaria: color }).parse(req.body);
+  await withTenant(tid(req), async c => {
+    await c.query(`INSERT INTO business_dossier (tenant_id, data) VALUES ($1, jsonb_build_object('marca', $2::jsonb))
+                   ON CONFLICT (tenant_id) DO UPDATE SET data = jsonb_set(business_dossier.data, '{marca}',
+                     coalesce(business_dossier.data->'marca', '{}') || $2::jsonb), updated_at = now()`, [tid(req), JSON.stringify(b)]);
+    await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'brand.saved', meta: b }, c);
+  });
+  res.json({ ok: true });
+});
+
+clientRouter.get('/art/preview', async (req, res) => {
+  const template = z.enum(TEMPLATES as [string, ...string[]]).default('destaque').parse(req.query.template);
+  res.set('Cache-Control', 'no-store').type('image/jpeg').send(await previewArt(tid(req), template as any));
+});
+
+/** Artes em lote: todos os posts do mês para Instagram/Facebook que ainda não têm imagem. */
+clientRouter.post('/content/arts', async (req, res) => {
+  const month = z.string().regex(/^\d{4}-\d{2}$/).default(new Date().toISOString().slice(0, 7)).parse(req.body?.month);
+  const n = await generateArtsForMonth(tid(req), month);
+  await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'content.arts_generated', meta: { month, n } });
+  res.json({ ok: true, geradas: n });
+});
+
 // ---------- Dossiê (memória do comércio) ----------
 clientRouter.get('/dossier', async (req, res) => {
   res.json(await withTenant(tid(req), async c =>
@@ -97,8 +167,10 @@ clientRouter.post('/dossier/ingest', async (req, res) => {
 clientRouter.post('/content/generate', async (req, res) => {
   const month = z.string().regex(/^\d{4}-\d{2}$/).default(new Date().toISOString().slice(0, 7)).parse(req.body?.month);
   const n = await generateMonthlyCalendar(tid(req), month);
-  await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'content.calendar_generated', meta: { month, n } });
-  res.json({ ok: true, criados: n });
+  // já entrega com as artes prontas para aprovar (o cliente vê o post como vai sair)
+  const artes = await generateArtsForMonth(tid(req), month).catch(e => { console.error('[artes]', e); return 0; });
+  await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'content.calendar_generated', meta: { month, n, artes } });
+  res.json({ ok: true, criados: n, artes });
 });
 
 clientRouter.get('/content', async (req, res) => {
@@ -133,7 +205,8 @@ approvalsRouter.put('/:id/media', async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
   const images = z.array(z.string().url().regex(/^https:\/\//, 'Use um link https')).max(10).parse(req.body?.images);
   await withTenant(tid(req), async c => {
-    const r = await c.query(`UPDATE content_items SET payload = payload - 'image_url' || jsonb_build_object('images', $2::jsonb)
+    await c.query(`DELETE FROM media WHERE content_item_id = $1 AND kind = 'art'`, [id]);
+    const r = await c.query(`UPDATE content_items SET payload = (payload - 'image_url' - 'art') || jsonb_build_object('images', $2::jsonb)
                              WHERE id = $1 AND status IN ('pending_approval', 'changes_requested', 'approved', 'failed')`,
                             [id, JSON.stringify(images)]);
     if (!r.rowCount) throw Object.assign(new Error('Este conteúdo não pode mais ser alterado'), { status: 409 });
@@ -154,9 +227,28 @@ approvalsRouter.post('/:id/retry', async (req, res) => {
 });
 
 approvalsRouter.post('/:id/revise', async (req, res) => {
-  await reviseItem(tid(req), z.string().uuid().parse(req.params.id));
+  const id = z.string().uuid().parse(req.params.id);
+  await reviseItem(tid(req), id);
+  await regenerateIfGenerated(tid(req), id);
   res.json({ ok: true });
 });
+
+/** Gera ou refaz a arte: trocar modelo, trocar foto ou tirar a foto. */
+approvalsRouter.post('/:id/art', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const b = z.object({ template: z.enum(TEMPLATES as [string, ...string[]]).optional(),
+                       photoId: z.string().uuid().nullable().optional() }).parse(req.body ?? {});
+  const r = await withTenant(tid(req), c => generateArt(c, tid(req), id, b as any));
+  res.json({ ok: true, ...r });
+});
+
+/** Texto reescrito pela IA: a arte gerada automaticamente acompanha (link colado à mão é mantido). */
+async function regenerateIfGenerated(tenantId: string, id: string) {
+  await withTenant(tenantId, async c => {
+    const gen = (await c.query(`SELECT payload->'art'->>'generated' = 'true' AS g FROM content_items WHERE id = $1`, [id])).rows[0]?.g;
+    if (gen) await generateArt(c, tenantId, id);
+  }).catch(e => console.error('[artes]', e));
+}
 
 approvalsRouter.post('/:id', async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
@@ -172,7 +264,7 @@ approvalsRouter.post('/:id', async (req, res) => {
   });
   // pedido de ajuste: a IA reescreve na hora e o item volta para a fila
   if (b.decision === 'changes') {
-    try { await reviseItem(tid(req), id); return res.json({ ok: true, revisado: true }); }
+    try { await reviseItem(tid(req), id); await regenerateIfGenerated(tid(req), id); return res.json({ ok: true, revisado: true }); }
     catch (e: any) { return res.json({ ok: true, revisado: false, aviso: e.message }); }
   }
   res.json({ ok: true });
