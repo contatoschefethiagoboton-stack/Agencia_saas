@@ -2,6 +2,7 @@ import { brl, type Me } from '../api';
 import { useLoad } from '../ui/useLoad';
 import { ProgressBar } from '../ui/Charts';
 import PainelCliente from './PainelCliente';
+import Metricas from './Metricas';
 
 interface Summary {
   negocio: { name: string; city: string | null; plan_name: string | null; posts_per_month: number | null };
@@ -59,7 +60,16 @@ export default function Resumo({ me }: { me: Me }) {
           <span className="card-sub">{s.ia ? `${brl(s.ia.cost_cents)} de ${brl(s.ia.quota_cents)}` : 'sem uso ainda'}</span></article>
       </section>
 
-      <PainelCliente />
+      {s.canais.some(c => c === 'instagram' || c === 'meta_ads') ? <Metricas /> : (
+        <>
+          <section className="card" style={{ borderColor: 'var(--accent)' }}>
+            <h2>Conecte seu Instagram e Facebook</h2>
+            <p className="card-sub">Assim os conteúdos aprovados são publicados sozinhos e os números reais aparecem aqui.</p>
+            <div className="actions"><a className="btn btn-primary" href="#conexoes">Conectar agora</a></div>
+          </section>
+          <PainelCliente />
+        </>
+      )}
     </>
   );
 }

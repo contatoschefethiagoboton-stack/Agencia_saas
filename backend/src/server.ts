@@ -12,6 +12,7 @@ import { adminRouter } from './admin/routes.js';
 import { requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { clientRouter, approvalsRouter } from './client/routes.js';
+import { metaCallbackRouter } from './integrations/meta/oauth.js';
 
 const app = express();
 app.set('trust proxy', 1);                   // atrás do proxy do Render/Cloudflare
@@ -28,6 +29,7 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }));   // health check do
 app.use('/webhooks/pagamentos', webhookRouter);   // sem sessão; protegidos por assinatura
 app.use('/webhooks/whatsapp', waWebhookRouter);    // Meta (HMAC) e Twilio (assinatura)
 
+app.use('/oauth/meta', apiLimiter, metaCallbackRouter);   // retorno do login da Meta (sem sessão; state assinado)
 app.use('/api', apiLimiter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', requireAuth, adminRouter);
@@ -58,7 +60,8 @@ app.listen(Number(process.env.PORT ?? 3000), () => console.log('API no ar'));
 if (process.env.RUN_WORKERS_IN_WEB !== '0' && (process.env.DATABASE_URL || process.env.DATABASE_URL_SERVICE)) {
   const { runOutboxWorker } = await import('./whatsapp/outboxWorker.js');
   const { runAiWorker } = await import('./whatsapp/aiAgent.js');
-  for (const [name, run] of [['fila WhatsApp', runOutboxWorker], ['IA WhatsApp', runAiWorker]] as const) {
+  const { runPublisher } = await import('./integrations/meta/publish.js');
+  for (const [name, run] of [['fila WhatsApp', runOutboxWorker], ['IA WhatsApp', runAiWorker], ['publicador', runPublisher]] as const) {
     (async function loop() {
       for (;;) {
         try { await run(); } catch (e) { console.error(`[worker ${name}]`, (e as Error).message); }

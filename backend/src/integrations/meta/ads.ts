@@ -1,21 +1,10 @@
 import { withTenant, servicePool } from '../../db.js';
 import { decryptToken } from '../../security/vault.js';
-import { assertNotPanicking } from '../../security/panic.js';
+import { graphPost } from './graph.js';
 
-const G = () => `https://graph.facebook.com/${process.env.META_API_VERSION}`;
-
-async function graph(path: string, token: string, body?: Record<string, unknown>) {
-  // pausar campanha é sempre permitido, mesmo em modo pânico (é o que o pânico quer)
-  if (!(body && body.status === 'PAUSED' && Object.keys(body).length === 1)) await assertNotPanicking();
-  const r = await fetch(`${G()}/${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const json = await r.json();
-  if (!r.ok) throw new Error(`Meta API: ${json?.error?.message ?? r.status}`);
-  return json;
-}
+/** Pausar campanha é sempre permitido, mesmo em modo pânico (é o que o pânico quer). */
+const graph = (path: string, token: string, body: Record<string, unknown>) =>
+  graphPost(path, token, body, { allowInPanic: body.status === 'PAUSED' && Object.keys(body).length === 1 });
 
 /** Projeção simples (estimativa): para números da própria Meta use o endpoint delivery_estimate. */
 export function projectReach(monthlyBudgetCents: number, cpmCentsLow = 800, cpmCentsHigh = 2500) {

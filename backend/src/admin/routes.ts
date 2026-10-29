@@ -215,10 +215,12 @@ adminRouter.patch('/tenants/:id', async (req, res) => {
 
 adminRouter.post('/tenants/:id/reactivate', requireRecentMfa, async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
-  await withAdmin(async c => {
+  const users = await withAdmin(async c => {
     await c.query(`UPDATE tenants SET status = 'active', suspended_reason = NULL WHERE id = $1`, [id]);
     await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.reactivated' }, c);
+    return (await c.query(`SELECT id FROM users WHERE tenant_id = $1`, [id])).rows;
   });
+  await Promise.all(users.map(u => redis.del(`authstate:${u.id}`)));   // libera na hora, sem esperar o cache
   res.json({ ok: true });
 });
 

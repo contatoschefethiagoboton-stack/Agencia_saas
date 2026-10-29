@@ -32,10 +32,11 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Dossiê do negócio (memória do comércio) | ✅ | tela **Meu negócio** |
 | Leitura automática do **site** do cliente | 🟡 precisa `ANTHROPIC_API_KEY` | com proteção contra SSRF |
 | Leitura de **cardápio/catálogo em PDF** | 🟡 precisa `ANTHROPIC_API_KEY` | PDF vai direto para o modelo |
-| Leitura do **Instagram** | 🟡 | só pela API oficial depois que o cliente conecta a conta (OAuth). Raspagem de perfil viola os termos da Meta e não foi implementada |
+| Leitura do **Instagram** | 🟡 | métricas e posts pela API oficial depois que o cliente conecta (tela **Conexões**). Raspagem de perfil viola os termos da Meta e não foi implementada |
 | Leitura do **Google Meu Negócio** | 🟡 | Business Profile API exige projeto Google aprovado + OAuth do dono. Hoje: dados digitados ou vindos do site |
 | **Criar perfis** de Instagram/TikTok/Facebook/Google via API | ⛔ | não existe API oficial para isso. Caminho: assistente guiado + conexão OAuth (próxima etapa) |
-| Conectar canais por OAuth (Instagram, Facebook, TikTok, Google) | 🔲 falta | tabela `channel_connections` com token cifrado já existe; faltam as telas e rotas de OAuth |
+| Conectar **Instagram + Facebook + Meta Ads** (login oficial da Meta) | ✅ testado com Graph API simulada · 🟡 precisa app Meta | tela **Conexões**; ver `docs/META_SETUP.md` |
+| Conectar TikTok e Google Meu Negócio | 🔲 falta | mesmo padrão da Meta |
 
 ## 3. Conteúdo e tráfego pago
 
@@ -45,9 +46,11 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Painel de aprovação Kanban + **Aprovar tudo** + **Pedir ajuste** em texto (IA reescreve) | ✅ | tela **Aprovações** |
 | Teto de IA por plano (para antes de gastar) | ✅ | `budgetGuard.ts` + `plans.ai_quota_cents` |
 | Geração das **artes** em lote | 🔲 falta | cada item já traz `imagePrompt` e `template`; falta ligar a um gerador de imagens/Canva e guardar os arquivos |
-| **Publicação** automática (Instagram, Facebook, Google) | 🔲 falta | depende do OAuth dos canais + worker de publicação dos itens `approved` |
+| **Publicação** automática no Instagram (post, carrossel, story) e Facebook | ✅ testado com Graph API simulada · 🟡 precisa app Meta | só itens aprovados; Instagram exige o link da arte; falha mostra o motivo e "Tentar de novo" |
+| Publicação no Google Meu Negócio | 🔲 falta | depende do acesso à Business Profile API |
 | Vídeos via **TikTok Content Posting API** | 🟡⛔ | o app precisa passar pela auditoria do TikTok para publicar como público |
-| **Meta Ads** local por raio (nasce pausada) | 🟡 | `integrations/meta/ads.ts`; exige app aprovado (`ads_management`) e conta de anúncios do cliente compartilhada |
+| **Meta Ads** local por raio (nasce pausada) | 🟡 | `integrations/meta/ads.ts`; exige app aprovado (`ads_management`). Conta de anúncios já é conectada pela tela **Conexões**; falta a tela de criar campanha |
+| Métricas reais no painel do cliente (Instagram + Meta Ads) | ✅ testado com Graph API simulada | substitui a prévia assim que o cliente conecta |
 | **Google Ads** | 🔲 falta | exige developer token com acesso Básico + conta MCC |
 
 ## 4. WhatsApp multi-tenant
@@ -60,6 +63,7 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Blindagem do número (fila única, cadência por qualidade, opt-in/opt-out, janela 24h) | ✅ código | `cadence.ts`, `outboxWorker.ts` |
 | Atendente IA 24/7 restrito ao negócio + transferência para humano | 🟡 precisa `ANTHROPIC_API_KEY` | `aiAgent.ts` |
 | Painel multi-atendente por negócio, tempo real | ✅ código | tela **Atendimento WhatsApp** (SSE) |
+| Roteamento do webhook e fila de envio com banco sem superusuário (Render) | ✅ corrigido e testado | antes as funções não enxergavam nenhum número por causa do RLS forçado |
 
 ## 5. Financeiro
 
@@ -95,12 +99,12 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 
 ## Próximas etapas recomendadas (ordem)
 
-1. **OAuth dos canais** (Meta: Instagram + Facebook + Ads; Google Business) — destrava leitura real, publicação e anúncios.
-2. **Worker de publicação** dos conteúdos aprovados + geração de artes.
-3. **Métricas reais** no painel do cliente (Instagram Insights, Meta Ads Insights) no lugar da prévia.
-4. Criação de campanhas Meta Ads pela tela (fluxo: projeção → aprovação → ativação).
+1. ~~Conexão Meta, publicação automática e métricas reais~~ ✅ feito (falta só criar o app na Meta: `docs/META_SETUP.md`).
+2. **Geração de artes** em lote (hoje o cliente cola o link da arte) e armazenamento de imagens.
+3. Criação de campanhas Meta Ads pela tela (projeção → aprovação → ativação) e renovação do token de anúncios.
+4. Google Meu Negócio e TikTok (conexão + publicação).
 5. Google Ads, Pagar.me e Zenvia.
-6. Testes automatizados de isolamento no CI (o roteiro de ponta a ponta usado nesta revisão pode virar a base).
+6. Testes automatizados de isolamento no CI (os roteiros de ponta a ponta usados nas revisões podem virar a base).
 
 ## Aprovações externas que levam semanas — começar já
 
