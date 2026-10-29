@@ -1,5 +1,7 @@
 import 'express-async-errors';
 import express from 'express';
+import path from 'node:path';
+import fs from 'node:fs';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { authRouter } from './auth/routes.js';
@@ -18,6 +20,8 @@ app.disable('x-powered-by');
 app.use(helmet());
 app.use(cookieParser());
 app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } }));
+
+app.get('/healthz', (_req, res) => res.json({ ok: true }));   // health check do Render
 
 app.use('/webhooks/pagamentos', webhookRouter);   // sem sessão; protegidos por assinatura
 app.use('/webhooks/whatsapp', waWebhookRouter);    // Meta (HMAC) e Twilio (assinatura)
@@ -46,6 +50,13 @@ app.post('/api/approvals/:id', requireAuth, async (req, res) => {
   });
   res.json({ ok: true });
 });
+
+// ---------- Painel React (build do Vite copiado para ./public no Docker) ----------
+const webDir = path.resolve(process.env.WEB_DIR ?? 'public');
+if (fs.existsSync(path.join(webDir, 'index.html'))) {
+  app.use(express.static(webDir, { index: false }));
+  app.get(/^\/(?!api\/|webhooks\/).*/, (_req, res) => res.sendFile(path.join(webDir, 'index.html')));
+}
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err?.name === 'ZodError') return res.status(400).json({ error: 'Dados inválidos' });
