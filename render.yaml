@@ -1,0 +1,90 @@
+# Blueprint do Render: Dashboard → New → Blueprint → escolha este repositório.
+# Cria a API (Docker), o Redis (Key Value) e o Postgres, já ligados entre si.
+services:
+  - type: web
+    name: agencia-saas
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agencia-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: agencia-redis
+          property: connectionString
+      # Segredos gerados automaticamente pelo Render (base64 de 256 bits)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true
+      - key: TOKEN_ENC_KEY
+        generateValue: true
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5-5
+      - key: META_API_VERSION
+        value: v25.0
+      - key: ASAAS_API_URL
+        value: https://api.asaas.com/v3
+      - key: PLATFORM_PROFIT_SHARE_BPS
+        value: "6000"
+      - key: WITHDRAWAL_DAILY_CAP_CENTS
+        value: "2000000"
+      # Preenchidos por você no painel do Render (sync: false = o Render pergunta na criação)
+      - key: PUBLIC_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_SYSTEM_TOKEN
+        sync: false
+      - key: PLATFORM_WA_PHONE_ID
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_BR_BUNDLE_SID
+        sync: false
+      - key: TWILIO_BR_ADDRESS_SID
+        sync: false
+      - key: ASAAS_API_KEY
+        sync: false
+      - key: ASAAS_WEBHOOK_TOKEN
+        sync: false
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_WEBHOOK_SECRET
+        sync: false
+
+  - type: keyvalue
+    name: agencia-redis
+    plan: free
+    ipAllowList: []          # só acessível pela rede interna do Render
+
+  # Workers (fila do WhatsApp + IA). Background Worker não existe no plano free;
+  # descomente quando for usar (plano starter).
+  # - type: worker
+  #   name: agencia-workers
+  #   runtime: docker
+  #   plan: starter
+  #   dockerfilePath: ./Dockerfile
+  #   dockerCommand: node dist/workers.js
+  #   envVars:               # repita aqui as mesmas variáveis do serviço web
+
+databases:
+  - name: agencia-db
+    plan: free
+    databaseName: agencia
+    user: agencia

@@ -1,9 +1,12 @@
 import pg from 'pg';
 import type { PoolClient } from 'pg';
 
-export const appPool     = new pg.Pool({ connectionString: process.env.DATABASE_URL_APP, max: 20 });
-export const servicePool = new pg.Pool({ connectionString: process.env.DATABASE_URL_SERVICE, max: 10 });
-export const adminPool   = new pg.Pool({ connectionString: process.env.DATABASE_URL_ADMIN, max: 5 });
+// Sem as três URLs separadas (ex.: Render com um único usuário), todas caem em DATABASE_URL.
+const url = (specific?: string) => specific || process.env.DATABASE_URL;
+
+export const appPool     = new pg.Pool({ connectionString: url(process.env.DATABASE_URL_APP), max: 20 });
+export const servicePool = new pg.Pool({ connectionString: url(process.env.DATABASE_URL_SERVICE), max: 10 });
+export const adminPool   = new pg.Pool({ connectionString: url(process.env.DATABASE_URL_ADMIN), max: 5 });
 
 type Fn<T> = (c: PoolClient) => Promise<T>;
 

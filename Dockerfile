@@ -26,5 +26,6 @@ COPY --from=web /app/frontend/dist ./public
 COPY db ./db
 USER node
 EXPOSE 3000
+# Aplica as migrações pendentes e sobe a API.
 # Para o worker (Background Worker no Render), troque o comando para: node dist/workers.js
-CMD ["node", "dist/server.js"]
+CMD ["sh", "-c", "node dist/migrate.js && node dist/server.js"]

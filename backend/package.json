@@ -2,7 +2,7 @@
   "name": "agencia-saas-backend",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "tsx watch src/server.ts", "build": "tsc", "start": "node dist/server.js", "workers": "node dist/workers.js" },
+  "scripts": { "dev": "tsx watch src/server.ts", "build": "tsc", "start": "node dist/server.js", "workers": "node dist/workers.js", "migrate": "node dist/migrate.js" },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "argon2": "^0.41.0",
