@@ -1,0 +1,15 @@
+.aq { max-width: 40rem; margin: 0 auto; padding: 1.5rem 1rem; font-family: inherit;
+      color: var(--ink); background: var(--mist); }
+.aq-title { font-size: clamp(1.6rem, 5vw, 2.3rem); font-weight: 800; line-height: 1.1; margin: 0 0 1.25rem; }
+.aq-card { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 1.1rem 1.2rem; margin-bottom: 1rem; }
+.aq-when { display: flex; justify-content: space-between; gap: .5rem; color: var(--soft); font-size: .9rem; }
+.aq-when strong { color: var(--ink); }
+.aq-caption { font-size: 1.05rem; line-height: 1.55; white-space: pre-line; margin: .8rem 0; }
+.aq-slides { padding-left: 1.2rem; line-height: 1.5; }
+.aq-tags { color: var(--soft); font-size: .9rem; word-break: break-word; }
+.aq-actions { display: flex; gap: .6rem; justify-content: flex-end; margin-top: 1rem; }
+.aq-actions button { font: inherit; font-weight: 600; border-radius: 10px; padding: .7rem 1.1rem; cursor: pointer; min-height: 44px; }
+.aq-approve { background: var(--go); color: #fff; border: 0; }
+.aq-reject { background: transparent; color: var(--stop); border: 1px solid var(--stop); }
+.aq-actions button:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.aq-msg { font-family: inherit; padding: 2rem 1rem; text-align: center; color: var(--soft); }
