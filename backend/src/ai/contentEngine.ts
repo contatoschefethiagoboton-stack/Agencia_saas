@@ -45,6 +45,9 @@ const Item = z.object({
   trigger: z.string().optional(),                 // gatilho mental usado
   slides: z.array(z.string()).optional(), script: z.string().optional(), imagePrompt: z.string().optional(),
   template: z.string().optional(),                // template de arte por nicho (para geração em lote)
+  headline: z.string().max(90).optional(),         // texto grande da arte
+  subline: z.string().max(160).optional(),         // texto de apoio da arte
+  cta: z.string().max(40).optional(),              // botão da arte ("Peça no WhatsApp")
 });
 const Calendar = z.object({ items: z.array(Item).min(1).max(60) });
 
@@ -67,11 +70,15 @@ export async function generateMonthlyCalendar(tenantId: string, month: string) {
       system: `Você é estrategista de marketing local brasileiro. ${SAFETY}
 Responda SOMENTE com JSON válido: {"items":[{"date":"YYYY-MM-DD","channel":"instagram|facebook|tiktok|google_business",
 "kind":"post|carousel|reel_script|story|gbp_post","caption":"...","hashtags":["#..."],"trigger":"...",
-"slides":["..."],"script":"...","imagePrompt":"...","template":"..."}]}.
+"slides":["..."],"script":"...","imagePrompt":"...","template":"...","headline":"...","subline":"...","cta":"..."}]}.
 Pautas do nicho: ${playbook(ctx.plan?.niche ?? ctx.dossier.nicho)}.
 Legendas com gancho na 1ª linha, SEO local (cidade/bairro do dossiê) e chamada para ação (WhatsApp, rota, encomenda).
 Roteiros de vídeo (kind reel_script, canais tiktok/instagram) com cenas de 15–30s gravações simples de celular.
-"template" = nome do modelo de arte (ex.: "oferta-do-dia", "bastidores", "depoimento", "dica") para gerar as artes em lote.`,
+"template" = modelo de arte: "oferta", "bastidores", "dica", "depoimento" ou "destaque".
+Para posts, carrosséis e stories, a arte é gerada a partir de: "headline" (frase forte de até 50 caracteres, sem emoji nem hashtag),
+"subline" (apoio de até 110 caracteres, opcional), "cta" (até 24 caracteres, ex.: "Peça no WhatsApp").
+Em carrosséis, "slides" tem de 3 a 7 frases curtas (até 90 caracteres cada), uma por slide; a capa usa "headline".
+Depoimento só com depoimento REAL que esteja no dossiê; se não houver, não use esse modelo.`,
       messages: [{ role: 'user', content:
         `<dados>${JSON.stringify(ctx.dossier)}</dados>\n\nGere ${total} conteúdos distribuídos pelos dias de ${month}: ` +
         `cerca de 40% posts, 15% carrosséis, 30% roteiros de vídeo curto, 15% posts do Google Meu Negócio.` }],

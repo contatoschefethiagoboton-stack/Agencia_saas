@@ -45,8 +45,9 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Calendário de 30 dias por IA (legendas, gatilhos mentais, carrosséis, roteiros, posts do Google) | 🟡 precisa `ANTHROPIC_API_KEY` | quantidade conforme o plano; playbooks por nicho; Safety Prompt |
 | Painel de aprovação Kanban + **Aprovar tudo** + **Pedir ajuste** em texto (IA reescreve) | ✅ | tela **Aprovações** |
 | Teto de IA por plano (para antes de gastar) | ✅ | `budgetGuard.ts` + `plans.ai_quota_cents` |
-| Geração das **artes** em lote | 🔲 falta | cada item já traz `imagePrompt` e `template`; falta ligar a um gerador de imagens/Canva e guardar os arquivos |
-| **Publicação** automática no Instagram (post, carrossel, story) e Facebook | ✅ testado com Graph API simulada · 🟡 precisa app Meta | só itens aprovados; Instagram exige o link da arte; falha mostra o motivo e "Tentar de novo" |
+| Geração das **artes** em lote por modelo de nicho | ✅ testado | 6 modelos (destaque, oferta, bastidores, dica, depoimento, carrossel) com cores, logo e fotos do cliente; JPG 1080×1350 (story 1080×1920); geradas junto com o calendário; tela **Identidade visual** |
+| Imagens geradas por IA (foto "do zero") | 🔲 opcional | hoje as artes usam as fotos reais do negócio; dá para plugar um gerador de imagens como mais uma fonte de foto |
+| **Publicação** automática no Instagram (post, carrossel, story) e Facebook | ✅ testado com Graph API simulada · 🟡 precisa app Meta | só itens aprovados, já com a arte gerada (ou link próprio); falha mostra o motivo e "Tentar de novo" |
 | Publicação no Google Meu Negócio | 🔲 falta | depende do acesso à Business Profile API |
 | Vídeos via **TikTok Content Posting API** | 🟡⛔ | o app precisa passar pela auditoria do TikTok para publicar como público |
 | **Meta Ads** local por raio (nasce pausada) | 🟡 | `integrations/meta/ads.ts`; exige app aprovado (`ads_management`). Conta de anúncios já é conectada pela tela **Conexões**; falta a tela de criar campanha |
@@ -100,7 +101,7 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 ## Próximas etapas recomendadas (ordem)
 
 1. ~~Conexão Meta, publicação automática e métricas reais~~ ✅ feito (falta só criar o app na Meta: `docs/META_SETUP.md`).
-2. **Geração de artes** em lote (hoje o cliente cola o link da arte) e armazenamento de imagens.
+2. ~~Geração de artes em lote~~ ✅ feito. Com muito volume, mover as imagens do Postgres para um storage (S3/R2).
 3. Criação de campanhas Meta Ads pela tela (projeção → aprovação → ativação) e renovação do token de anúncios.
 4. Google Meu Negócio e TikTok (conexão + publicação).
 5. Google Ads, Pagar.me e Zenvia.

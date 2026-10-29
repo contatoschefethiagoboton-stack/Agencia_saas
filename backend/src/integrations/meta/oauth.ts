@@ -8,6 +8,7 @@ import { audit } from '../../audit/audit.js';
 import { encryptToken, decryptToken } from '../../security/vault.js';
 import { assertNotPanicking } from '../../security/panic.js';
 import { graphBase, graphGet, metaReady } from './graph.js';
+import { publicUrl } from '../../config.js';
 
 /*
  * CONEXÃO COM A META (Facebook Login para Empresas)
@@ -23,7 +24,6 @@ const SCOPES = () => process.env.META_OAUTH_SCOPES ?? [
   'instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'read_insights',
   'ads_read', 'ads_management',
 ].join(',');
-const publicUrl = () => (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000').replace(/\/$/, '');
 const redirectUri = () => `${publicUrl()}/oauth/meta/callback`;
 type State = { tid: string; sub: string; n: string; purpose: 'meta_oauth' };
 
