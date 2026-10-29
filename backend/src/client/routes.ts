@@ -9,6 +9,10 @@ import { clientMetrics } from '../integrations/meta/insights.js';
 import { redis } from '../redis.js';
 import { generateArt, generateArtsForMonth, previewArt, TEMPLATES } from '../art/service.js';
 import { imageInfo } from '../art/render.js';
+import { generatePhoto, imagesReady } from '../ai/images.js';
+import { googleConnectRouter, googleReady } from '../integrations/google/google.js';
+import { metaReady } from '../integrations/meta/graph.js';
+import { adsRouter } from './ads.js';
 
 /** Painel do negócio. Tudo passa por withTenant: o RLS garante que um cliente nunca vê dados de outro. */
 export const clientRouter = Router();
@@ -38,8 +42,14 @@ clientRouter.get('/summary', async (req, res) => {
   }));
 });
 
+// ---------- O que está ligado nesta instalação (a tela esconde o que não existe) ----------
+clientRouter.get('/features', (_req, res) => res.json({
+  meta: metaReady(), google: googleReady(), fotosIA: imagesReady(), textoIA: Boolean(process.env.ANTHROPIC_API_KEY) }));
+
 // ---------- Conexões com redes sociais ----------
 clientRouter.use('/connect/meta', metaConnectRouter);
+clientRouter.use('/connect/google', googleConnectRouter);
+clientRouter.use('/ads', adsRouter);
 
 clientRouter.get('/connections', async (req, res) => {
   res.json(await withTenant(tid(req), async c => (await c.query(
@@ -53,7 +63,7 @@ clientRouter.delete('/connections/:provider', async (req, res) => {
     await c.query(`DELETE FROM channel_connections WHERE provider = $1`, [provider]);
     await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'channels.disconnected', target: provider }, c);
   });
-  await redis.del([`metrics:${tid(req)}:7`, `metrics:${tid(req)}:30`]);
+  await redis.del([`metrics:${tid(req)}:7`, `metrics:${tid(req)}:30`, `gtoken:${tid(req)}`]);
   res.json({ ok: true });
 });
 
@@ -68,7 +78,8 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 clientRouter.get('/media', async (req, res) => {
   const kind = z.enum(['photo', 'logo', 'art']).default('photo').parse(req.query.kind);
   res.json(await withTenant(tid(req), async c => (await c.query(
-    `SELECT id, kind, width, height, created_at FROM media WHERE kind = $1 ORDER BY created_at DESC LIMIT 200`, [kind])).rows));
+    `SELECT id, kind, width, height, source, prompt, content_item_id, created_at FROM media WHERE kind = $1
+      ORDER BY created_at DESC LIMIT 200`, [kind])).rows));
 });
 
 clientRouter.get('/media/:id/raw', async (req, res) => {
@@ -97,6 +108,14 @@ clientRouter.post('/media', async (req, res) => {
     await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: `media.${b.kind}_uploaded` }, c);
     return r.rows[0].id;
   });
+  res.status(201).json({ id });
+});
+
+/** Foto criada por IA a partir de uma descrição; entra na biblioteca de fotos. */
+clientRouter.post('/media/ai', async (req, res) => {
+  const prompt = z.string().trim().min(8).max(500).parse(req.body?.prompt);
+  const id = await generatePhoto(tid(req), prompt);
+  await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'media.ai_photo', target: id });
   res.status(201).json({ id });
 });
 
@@ -240,6 +259,22 @@ approvalsRouter.post('/:id/art', async (req, res) => {
                        photoId: z.string().uuid().nullable().optional() }).parse(req.body ?? {});
   const r = await withTenant(tid(req), c => generateArt(c, tid(req), id, b as any));
   res.json({ ok: true, ...r });
+});
+
+/** Cria uma foto por IA para este post (a partir da sugestão de imagem da IA ou de uma descrição) e refaz a arte com ela. */
+approvalsRouter.post('/:id/photo-ai', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const custom = z.string().trim().min(8).max(500).optional().parse(req.body?.prompt);
+  const item = await withTenant(tid(req), async c => (await c.query(`SELECT kind, payload FROM content_items WHERE id = $1`, [id])).rows[0]);
+  if (!item) return res.status(404).json({ error: 'Conteúdo não encontrado' });
+  const prompt = custom ?? item.payload.imagePrompt ?? String(item.payload.caption ?? '').split('\n')[0].slice(0, 300);
+  if (!prompt || prompt.length < 8) return res.status(400).json({ error: 'Descreva a foto que você quer' });
+  const photoId = await generatePhoto(tid(req), prompt);
+  const current = item.payload.art?.template;
+  const template = item.kind === 'carousel' ? undefined : ['oferta', 'bastidores', 'destaque'].includes(current) ? current : 'destaque';
+  const r = await withTenant(tid(req), c => generateArt(c, tid(req), id, { template, photoId }));
+  await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'media.ai_photo', target: id });
+  res.json({ ok: true, photoId, ...r });
 });
 
 /** Texto reescrito pela IA: a arte gerada automaticamente acompanha (link colado à mão é mantido). */

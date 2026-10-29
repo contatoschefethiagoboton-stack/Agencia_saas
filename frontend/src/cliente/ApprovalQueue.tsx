@@ -16,7 +16,8 @@ const channelName: Record<string, string> = { instagram: 'Instagram', facebook: 
 const kindName: Record<string, string> = { post: 'Post', carousel: 'Carrossel', reel_script: 'Vídeo curto', story: 'Story', gbp_post: 'Post do Google' };
 const COLS: [string[], string][] = [[['pending_approval'], 'Para aprovar'], [['changes_requested'], 'Ajuste pedido'],
   [['approved', 'publishing', 'failed'], 'Agendados'], [['published'], 'Publicados']];
-const AUTO = (it: Item) => ['instagram', 'facebook'].includes(it.channel) && ['post', 'carousel', 'story'].includes(it.kind);
+const AUTO = (it: Item) => (['instagram', 'facebook'].includes(it.channel) && ['post', 'carousel', 'story'].includes(it.kind))
+  || (it.channel === 'google_business' && it.kind === 'gbp_post');
 const imagesOf = (p: Item['payload']) => p.images?.length ? p.images : p.image_url ? [p.image_url] : [];
 
 /** Filtro humano: o cliente só olha, aprova tudo de uma vez ou pede ajuste em texto. */
@@ -24,6 +25,7 @@ export default function ApprovalQueue() {
   const month = new Date().toISOString().slice(0, 7);
   const { data: items, error, reload } = useLoad<Item[]>(`/client/content?month=${month}`);
   const { data: photos } = useLoad<{ id: string }[]>('/client/media?kind=photo');
+  const { data: features } = useLoad<{ fotosIA: boolean }>('/client/features');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState('');
 
@@ -62,6 +64,13 @@ export default function ApprovalQueue() {
   async function makeArt(id: string, body: { template?: string; photoId?: string | null }) {
     setBusy(id); setMsg(null);
     try { await api(`/approvals/${id}/art`, { body }); reload(); }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(''); }
+  }
+
+  async function photoAi(id: string) {
+    setBusy(id); setMsg(null);
+    try { await api(`/approvals/${id}/photo-ai`, { body: {} }); setMsg({ kind: 'ok', text: 'Foto criada pela IA e arte refeita com ela.' }); reload(); }
     catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
     finally { setBusy(''); }
   }
@@ -105,7 +114,8 @@ export default function ApprovalQueue() {
             <section key={title} className="kanban-col" aria-label={title}>
               <h2>{title} <span className="badge">{col.length}</span></h2>
               {col.map(it => <Card key={it.id} it={it} busy={busy === it.id} onDecide={decide} onRetry={retry}
-                                     onPublishRetry={publishRetry} onMedia={saveMedia} onArt={makeArt} photos={photos ?? []} />)}
+                                     onPublishRetry={publishRetry} onMedia={saveMedia} onArt={makeArt} photos={photos ?? []}
+                                     onPhotoAi={features?.fotosIA ? photoAi : undefined} />)}
             </section>
           );
         })}
@@ -114,7 +124,8 @@ export default function ApprovalQueue() {
   );
 }
 
-function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia, onArt, photos }: { it: Item; busy: boolean; onRetry: (id: string) => void;
+function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia, onArt, photos, onPhotoAi }: { it: Item; busy: boolean; onRetry: (id: string) => void;
+  onPhotoAi?: (id: string) => void;
   onPublishRetry: (id: string) => void; onMedia: (id: string, images: string[]) => void;
   onArt: (id: string, b: { template?: string; photoId?: string | null }) => void; photos: { id: string }[];
   onDecide: (id: string, d: 'approve' | 'reject' | 'changes', f?: string) => void }) {
@@ -164,6 +175,7 @@ function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia, onArt, pho
               {photos.map((ph, i) => <option key={ph.id} value={ph.id}>Foto {i + 1}</option>)}
             </select>)}
           <button className="btn" disabled={busy} onClick={() => onArt(it.id, {})}>{busy ? 'Gerando…' : imgs.length ? 'Refazer arte' : 'Gerar arte'}</button>
+          {onPhotoAi && it.kind !== 'carousel' && <button className="btn" disabled={busy} onClick={() => onPhotoAi(it.id)}>{busy ? 'Criando…' : 'Foto por IA'}</button>}
           <button className="btn" disabled={busy} onClick={() => setEditImg(true)}>Usar link próprio</button>
         </div>
       ))}

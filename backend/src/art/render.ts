@@ -13,7 +13,7 @@ export const TEMPLATES: Template[] = ['destaque', 'oferta', 'bastidores', 'dica'
 
 export interface Img { mime: string; bytes: Buffer }
 export interface ArtInput {
-  template: Template; format: 'feed' | 'story';
+  template: Template; format: 'feed' | 'story' | 'square';
   brand: { name: string; primary: string; secondary: string; logo?: Img | null };
   headline: string; subline?: string; cta?: string; tag?: string;
   photo?: Img | null; slide?: { index: number; total: number };
@@ -43,7 +43,7 @@ const mix = (a: string, b: string, t: number) => '#' + rgb(a).map((v, i) => Math
 // ---------- texto ----------
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 /** Quebra em linhas que cabem na largura (estimativa por largura média do Inter) e diminui a fonte se precisar. */
-function fit(text: string, maxW: number, size: number, maxLines: number, minSize = 34, wf = 0.58) {
+export function fit(text: string, maxW: number, size: number, maxLines: number, minSize = 34, wf = 0.58) {
   const words = text.replace(/\s+/g, ' ').trim().split(' ');
   for (let s = size; s >= minSize; s -= 4) {
     const per = Math.max(4, Math.floor(maxW / (s * wf)));
@@ -60,6 +60,7 @@ function fit(text: string, maxW: number, size: number, maxLines: number, minSize
   const lines: string[] = []; let cur = '';
   for (const w of words) { if ((cur + ' ' + w).trim().length <= per) cur = (cur + ' ' + w).trim(); else { lines.push(cur); cur = w; } }
   lines.push(cur);
+  if (lines.length <= maxLines) return { lines, size: minSize };     // o passo de 4 em 4 pode pular o tamanho mínimo exato
   const cut = lines.slice(0, maxLines); cut[maxLines - 1] = cut[maxLines - 1].replace(/.{0,2}$/, '…');
   return { lines: cut, size: minSize };
 }
@@ -69,7 +70,7 @@ const dataUri = (i: Img) => `data:${i.mime};base64,${i.bytes.toString('base64')}
 
 // ---------- modelos ----------
 function svgFor(a: ArtInput) {
-  const W = 1080, H = a.format === 'story' ? 1920 : 1350, M = 88;
+  const W = 1080, H = a.format === 'story' ? 1920 : a.format === 'square' ? 1080 : 1350, M = 88;
   const P = hex(a.brand.primary), S = hex(a.brand.secondary);
   const onP = onColor(P), dark = '#14171F';
   const top = a.format === 'story' ? 220 : 0;                                   // área segura do story
@@ -154,11 +155,16 @@ function svgFor(a: ArtInput) {
         ${logo.replace('CLR', cover ? onP : P)}`;
       break;
     }
-    default: {   // destaque
-      const t = fit(a.headline, W - 2 * M, 110, 4);
-      const sub = a.subline ? fit(a.subline, W - 2 * M, 46, 3, 32, 0.52) : null;
-      const blockH = t.size * 1.12 * t.lines.length + (sub ? sub.size * 1.3 * sub.lines.length + 40 : 0);
-      const y0 = a.photo ? H * 0.58 : H / 2 - blockH / 2 + t.size;
+    default: {   // destaque: título + apoio empilhados acima do botão; a fonte diminui até caber
+      const ctaH = a.cta ? 130 : 0;
+      const limit = H - M - 150 - top / 2 - ctaH;            // acima do botão e da marca
+      let size = 110, t = fit(a.headline, W - 2 * M, size, 4), sub = a.subline ? fit(a.subline, W - 2 * M, 46, 3, 30, 0.52) : null;
+      const blockH = () => t.size * 1.12 * t.lines.length + (sub ? 50 + sub.size * 1.3 * sub.lines.length : 0);
+      while (blockH() > limit - M - top - 40 && size > 56) {
+        size -= 8; t = fit(a.headline, W - 2 * M, size, 4, 48); if (sub) sub = fit(a.subline!, W - 2 * M, Math.min(46, size * 0.45), 3, 28, 0.52);
+      }
+      const yTop = a.photo ? limit - blockH() : Math.max(M + top, Math.min((H - blockH()) / 2, limit - blockH()));
+      const y0 = yTop + t.size * 0.9;
       body = a.photo
         ? `${photo(0, 0, W, H)}<rect width="${W}" height="${H}" fill="url(#shade)"/>`
         : `<rect width="${W}" height="${H}" fill="url(#g)"/><circle cx="${W - 60}" cy="${top + 120}" r="260" fill="${S}" fill-opacity="0.25"/>`;
@@ -190,4 +196,11 @@ export function imageInfo(b: Buffer): { mime: 'image/jpeg' | 'image/png'; width:
     }
   }
   return null;
+}
+
+/** Converte PNG/JPG para JPG (qualidade 85) no tamanho original — fotos de IA chegam em PNG pesado. */
+export function toJpeg(img: Img, width: number, height: number): Buffer {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><image href="${dataUri(img)}" width="${width}" height="${height}"/></svg>`;
+  const r = new Resvg(svg, { font: { loadSystemFonts: false } }).render();
+  return Buffer.from(jpeg.encode({ data: r.pixels, width: r.width, height: r.height }, 85).data);
 }

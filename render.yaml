@@ -59,6 +59,12 @@ services:
         sync: false
       - key: PLATFORM_WA_PHONE_ID
         sync: false
+      - key: GOOGLE_CLIENT_ID       # Google Meu Negócio (ver docs/GOOGLE_SETUP.md)
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: IMAGE_API_KEY          # fotos por IA (API de imagens compatível com OpenAI)
+        sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
