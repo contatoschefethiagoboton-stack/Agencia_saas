@@ -36,7 +36,8 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Leitura do **Google Meu Negócio** | 🟡 | Business Profile API exige projeto Google aprovado + OAuth do dono. Hoje: dados digitados ou vindos do site |
 | **Criar perfis** de Instagram/TikTok/Facebook/Google via API | ⛔ | não existe API oficial para isso. Caminho: assistente guiado + conexão OAuth (próxima etapa) |
 | Conectar **Instagram + Facebook + Meta Ads** (login oficial da Meta) | ✅ testado com Graph API simulada · 🟡 precisa app Meta | tela **Conexões**; ver `docs/META_SETUP.md` |
-| Conectar TikTok e Google Meu Negócio | 🔲 falta | mesmo padrão da Meta |
+| Conectar **Google Meu Negócio** (login do Google, escolha do local) | ✅ testado com API simulada · 🟡 precisa projeto Google aprovado | ver `docs/GOOGLE_SETUP.md` |
+| Conectar TikTok | 🔲 falta | depende da auditoria do app no TikTok |
 
 ## 3. Conteúdo e tráfego pago
 
@@ -46,11 +47,12 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Painel de aprovação Kanban + **Aprovar tudo** + **Pedir ajuste** em texto (IA reescreve) | ✅ | tela **Aprovações** |
 | Teto de IA por plano (para antes de gastar) | ✅ | `budgetGuard.ts` + `plans.ai_quota_cents` |
 | Geração das **artes** em lote por modelo de nicho | ✅ testado | 6 modelos (destaque, oferta, bastidores, dica, depoimento, carrossel) com cores, logo e fotos do cliente; JPG 1080×1350 (story 1080×1920); geradas junto com o calendário; tela **Identidade visual** |
-| Imagens geradas por IA (foto "do zero") | 🔲 opcional | hoje as artes usam as fotos reais do negócio; dá para plugar um gerador de imagens como mais uma fonte de foto |
+| **Fotos por IA** para quem não tem fotos | ✅ testado com API simulada · 🟡 precisa `IMAGE_API_KEY` | entram na biblioteca; botão "Foto por IA" no post; contam no teto mensal de IA; regras de segurança no pedido |
 | **Publicação** automática no Instagram (post, carrossel, story) e Facebook | ✅ testado com Graph API simulada · 🟡 precisa app Meta | só itens aprovados, já com a arte gerada (ou link próprio); falha mostra o motivo e "Tentar de novo" |
-| Publicação no Google Meu Negócio | 🔲 falta | depende do acesso à Business Profile API |
+| Publicação no **Google Meu Negócio** (novidades com arte quadrada e botão Ligar) | ✅ testado com API simulada | mesmo fluxo de aprovação e publicador |
 | Vídeos via **TikTok Content Posting API** | 🟡⛔ | o app precisa passar pela auditoria do TikTok para publicar como público |
-| **Meta Ads** local por raio (nasce pausada) | 🟡 | `integrations/meta/ads.ts`; exige app aprovado (`ads_management`). Conta de anúncios já é conectada pela tela **Conexões**; falta a tela de criar campanha |
+| **Campanhas Meta Ads pela tela** (projeção → montada pausada → aprovação → no ar) | ✅ testado com API simulada · 🟡 precisa app Meta com `ads_management` | tela **Anúncios**: raio, verba, imagem, link (WhatsApp/site); público medido pela Meta |
+| **Vigia de verba**: pausa sozinho ao atingir a verba do mês | ✅ testado | roda a cada 15 min; Kill Switch e Modo Pânico também pausam |
 | Métricas reais no painel do cliente (Instagram + Meta Ads) | ✅ testado com Graph API simulada | substitui a prévia assim que o cliente conecta |
 | **Google Ads** | 🔲 falta | exige developer token com acesso Básico + conta MCC |
 
@@ -102,8 +104,8 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 
 1. ~~Conexão Meta, publicação automática e métricas reais~~ ✅ feito (falta só criar o app na Meta: `docs/META_SETUP.md`).
 2. ~~Geração de artes em lote~~ ✅ feito. Com muito volume, mover as imagens do Postgres para um storage (S3/R2).
-3. Criação de campanhas Meta Ads pela tela (projeção → aprovação → ativação) e renovação do token de anúncios.
-4. Google Meu Negócio e TikTok (conexão + publicação).
+3. ~~Campanhas Meta Ads pela tela~~ ✅ · ~~Google Meu Negócio~~ ✅ · ~~fotos por IA~~ ✅. Falta: aviso de renovação do token de anúncios (~60 dias).
+4. TikTok (conexão + publicação), depois da auditoria do app.
 5. Google Ads, Pagar.me e Zenvia.
 6. Testes automatizados de isolamento no CI (os roteiros de ponta a ponta usados nas revisões podem virar a base).
 

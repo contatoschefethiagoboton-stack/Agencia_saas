@@ -3,14 +3,15 @@ import { decryptToken } from '../../security/vault.js';
 import { isPanicking } from '../../security/panic.js';
 import { audit } from '../../audit/audit.js';
 import { graphGet, graphPost } from './graph.js';
+import { publishGbp } from '../google/google.js';
 
 /*
  * PUBLICADOR: a cada 30s pega os conteúdos APROVADOS cujo horário chegou e publica
- * no Facebook (página) e no Instagram (conta profissional) do próprio cliente, com o token dele.
+ * no Facebook (página), no Instagram (conta profissional) e no Google Meu Negócio do próprio cliente.
  * Nada que não foi aprovado é publicado. Falha nunca é repetida sozinha (evita post duplicado):
  * o cliente vê o erro no painel e clica em "Tentar de novo".
  */
-interface Item { id: string; tenant_id: string; channel: 'instagram' | 'facebook'; kind: string;
+interface Item { id: string; tenant_id: string; channel: 'instagram' | 'facebook' | 'google_business'; kind: string;
                  payload: { caption: string; hashtags?: string[]; image_url?: string; images?: string[] } }
 
 const captionOf = (p: Item['payload']) => [p.caption, (p.hashtags ?? []).join(' ')].filter(Boolean).join('\n\n').slice(0, 2200);
@@ -64,15 +65,18 @@ async function publishFacebook(pageId: string, token: string, it: Item) {
 
 export async function publishItem(tenantId: string, itemId: string) {
   const svc = <T>(fn: (c: any) => Promise<T>) => withTenant(tenantId, fn, servicePool);
-  const { it, conn } = await svc(async c => {
+  const { it, conn, phone } = await svc(async c => {
     const it = (await c.query(`SELECT id, tenant_id, channel, kind, payload FROM content_items WHERE id = $1`, [itemId])).rows[0] as Item;
     const conn = (await c.query(`SELECT external_id, token_cipher FROM channel_connections WHERE provider = $1`, [it.channel])).rows[0];
-    return { it, conn };
+    const phone = (await c.query(`SELECT data->>'telefone' AS t FROM business_dossier WHERE tenant_id = $1`, [tenantId])).rows[0]?.t;
+    return { it, conn, phone };
   });
   try {
-    if (!conn) throw new Error(`${it.channel === 'instagram' ? 'Instagram' : 'Facebook'} não conectado. Conecte em Conexões.`);
-    const token = decryptToken(conn.token_cipher);
-    const r = it.channel === 'instagram' ? await publishInstagram(conn.external_id, token, it) : await publishFacebook(conn.external_id, token, it);
+    const nome = { instagram: 'Instagram', facebook: 'Facebook', google_business: 'Google Meu Negócio' }[it.channel];
+    if (!conn) throw new Error(`${nome} não conectado. Conecte em Conexões.`);
+    const r = it.channel === 'google_business' ? await publishGbp(tenantId, conn, it.payload, phone)
+      : it.channel === 'instagram' ? await publishInstagram(conn.external_id, decryptToken(conn.token_cipher), it)
+      : await publishFacebook(conn.external_id, decryptToken(conn.token_cipher), it);
     await svc(async c => {
       await c.query(`UPDATE content_items SET status = 'published', external_id = $2, permalink = $3, published_at = now(), error = NULL
                      WHERE id = $1`, [it.id, r.id, r.permalink ?? null]);

@@ -5,12 +5,17 @@ import { useLoad } from '../ui/useLoad';
 interface Conn { provider: string; external_id: string; name: string | null; expires_at: string | null; connected_at: string }
 interface Pending { pages: { id: string; name: string; instagram: string | null }[]; adAccounts: { id: string; name: string; currency: string; status: number }[] }
 
-const NOMES: Record<string, string> = { facebook: 'Página do Facebook', instagram: 'Instagram profissional', meta_ads: 'Conta de anúncios (Meta Ads)' };
+const NOMES: Record<string, string> = { facebook: 'Página do Facebook', instagram: 'Instagram profissional', meta_ads: 'Conta de anúncios (Meta Ads)',
+                                        google_business: 'Google Meu Negócio' };
 
 /** Conecta Facebook, Instagram e Meta Ads pelo login oficial da Meta. */
 export default function Conexoes({ query, isOwner }: { query: URLSearchParams; isOwner: boolean }) {
   const conns = useLoad<Conn[]>('/client/connections');
+  const features = useLoad<{ meta: boolean; google: boolean }>('/client/features');
   const nonce = query.get('meta');
+  const gNonce = query.get('google');
+  const [gPending, setGPending] = useState<{ id: string; title: string; address: string }[] | null>(null);
+  const [gPick, setGPick] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
   const [pick, setPick] = useState({ pageId: '', adAccountId: '' });
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err' | 'warn'; text: string } | null>(
@@ -24,6 +29,29 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
       setPick({ pageId: p.pages.length === 1 ? p.pages[0].id : '', adAccountId: p.adAccounts.length === 1 ? p.adAccounts[0].id : '' });
     }).catch(e => setMsg({ kind: 'err', text: e.message }));
   }, [nonce]);
+
+  useEffect(() => {
+    if (!gNonce) return;
+    api<{ locations: { id: string; title: string; address: string }[] }>(`/client/connect/google/pending/${gNonce}`)
+      .then(r => { setGPending(r.locations); if (r.locations.length === 1) setGPick(r.locations[0].id); })
+      .catch(e => setMsg({ kind: 'err', text: e.message }));
+  }, [gNonce]);
+
+  async function startGoogle() {
+    setBusy(true); setMsg(null);
+    try { location.href = (await api<{ url: string }>('/client/connect/google/start', { body: {} })).url; }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); setBusy(false); }
+  }
+
+  async function confirmGoogle() {
+    setBusy(true);
+    try {
+      await api('/client/connect/google/select', { body: { n: gNonce, locationId: gPick } });
+      setMsg({ kind: 'ok', text: 'Google Meu Negócio conectado! Os posts do Google aprovados passam a ser publicados no horário.' });
+      setGPending(null); location.hash = '#conexoes'; conns.reload();
+    } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(false); }
+  }
 
   async function start() {
     setBusy(true); setMsg(null);
@@ -73,15 +101,45 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
         </section>
       )}
 
+      {gPending && (
+        <section className="card" style={{ borderColor: 'var(--accent)' }}>
+          <h2>Qual perfil do Google?</h2>
+          <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 10 }}>
+            <legend className="sr">Perfis de empresa encontrados</legend>
+            {gPending.map(l => (
+              <label key={l.id} className="tile" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+                <input type="radio" name="gloc" checked={gPick === l.id} onChange={() => setGPick(l.id)} />
+                <span style={{ fontSize: 15, color: 'var(--text)' }}><b>{l.title}</b>{l.address ? ` · ${l.address}` : ''}</span>
+              </label>))}
+          </fieldset>
+          <div className="actions"><button className="btn btn-primary" disabled={!gPick || busy} onClick={confirmGoogle}>{busy ? 'Conectando…' : 'Confirmar'}</button></div>
+        </section>
+      )}
+
+      <section className="card">
+        <div className="card-head" style={{ alignItems: 'center' }}>
+          <div><h2>Google Meu Negócio</h2>
+            <span className="card-sub">Publica as novidades do calendário no seu perfil do Google (aparece na busca e no Maps).</span></div>
+          {isOwner && features.data?.google && <button className="btn btn-primary" disabled={busy} onClick={startGoogle}>
+            {conns.data?.some(c => c.provider === 'google_business') ? 'Reconectar' : 'Conectar com Google'}</button>}
+        </div>
+        {features.data && !features.data.google && <p className="card-sub">A agência ainda está ativando esta integração.</p>}
+        {conns.data?.filter(c => c.provider === 'google_business').map(c => (
+          <div key={c.provider} className="actions" style={{ justifyContent: 'space-between' }}>
+            <span><b>{c.name}</b> <span className="card-sub">· desde {dataHora(c.connected_at)}</span></span>
+            {isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}
+          </div>))}
+      </section>
+
       <section className="card">
         <div className="card-head" style={{ alignItems: 'center' }}>
           <div><h2>Facebook, Instagram e Meta Ads</h2>
             <span className="card-sub">Login oficial da Meta. A plataforma nunca vê sua senha; você pode remover o acesso quando quiser.</span></div>
-          {isOwner && <button className="btn btn-primary" disabled={busy} onClick={start}>{conns.data?.length ? 'Reconectar' : 'Conectar com Facebook'}</button>}
+          {isOwner && <button className="btn btn-primary" disabled={busy} onClick={start}>{conns.data?.some(c => c.provider !== 'google_business') ? 'Reconectar' : 'Conectar com Facebook'}</button>}
         </div>
-        {conns.data?.length ? (
+        {conns.data?.some(c => c.provider !== 'google_business') ? (
           <div className="table-wrap"><table className="tbl">
-            <tbody>{conns.data.map(c => (
+            <tbody>{conns.data.filter(c => c.provider !== 'google_business').map(c => (
               <tr key={c.provider}><td><b>{NOMES[c.provider] ?? c.provider}</b></td><td>{c.name ?? c.external_id}</td>
                 <td className="card-sub">desde {dataHora(c.connected_at)}{c.expires_at ? ` · renovar até ${dataHora(c.expires_at)}` : ''}</td>
                 <td>{isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}</td></tr>))}

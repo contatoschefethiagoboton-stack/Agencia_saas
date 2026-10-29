@@ -13,6 +13,7 @@ import { requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { clientRouter, approvalsRouter } from './client/routes.js';
 import { metaCallbackRouter } from './integrations/meta/oauth.js';
+import { googleCallbackRouter } from './integrations/google/google.js';
 import { servicePool } from './db.js';
 
 const app = express();
@@ -40,6 +41,7 @@ app.use('/webhooks/pagamentos', webhookRouter);   // sem sessão; protegidos por
 app.use('/webhooks/whatsapp', waWebhookRouter);    // Meta (HMAC) e Twilio (assinatura)
 
 app.use('/oauth/meta', apiLimiter, metaCallbackRouter);   // retorno do login da Meta (sem sessão; state assinado)
+app.use('/oauth/google', apiLimiter, googleCallbackRouter);   // retorno do login do Google (idem)
 app.use('/api', apiLimiter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', requireAuth, adminRouter);
@@ -71,7 +73,9 @@ if (process.env.RUN_WORKERS_IN_WEB !== '0' && (process.env.DATABASE_URL || proce
   const { runOutboxWorker } = await import('./whatsapp/outboxWorker.js');
   const { runAiWorker } = await import('./whatsapp/aiAgent.js');
   const { runPublisher } = await import('./integrations/meta/publish.js');
-  for (const [name, run] of [['fila WhatsApp', runOutboxWorker], ['IA WhatsApp', runAiWorker], ['publicador', runPublisher]] as const) {
+  const { runAdsGuard } = await import('./integrations/meta/ads.js');
+  for (const [name, run] of [['fila WhatsApp', runOutboxWorker], ['IA WhatsApp', runAiWorker], ['publicador', runPublisher],
+                             ['vigia de verba', runAdsGuard]] as const) {
     (async function loop() {
       for (;;) {
         try { await run(); } catch (e) { console.error(`[worker ${name}]`, (e as Error).message); }
