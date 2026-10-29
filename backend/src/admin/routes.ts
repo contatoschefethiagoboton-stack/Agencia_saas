@@ -133,7 +133,9 @@ adminRouter.get('/tenants', async (_req, res) => {
            t.asaas_subscription_id IS NOT NULL AS cobranca_ativa,
            (SELECT email FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner' ORDER BY u.created_at LIMIT 1) AS owner_email,
            (SELECT count(*)::int FROM wa_numbers n WHERE n.tenant_id = t.id AND n.status = 'active') AS wa_ativos,
-           (SELECT min(quality_rating) FROM wa_numbers n WHERE n.tenant_id = t.id) AS wa_qualidade
+           (SELECT min(quality_rating) FROM wa_numbers n WHERE n.tenant_id = t.id) AS wa_qualidade,
+           (SELECT count(*)::int FROM channel_connections cc WHERE cc.tenant_id = t.id AND (cc.needs_reconnect
+              OR cc.expires_at < now() + interval '10 days')) AS conexoes_atencao
       FROM tenants t ORDER BY t.created_at DESC`)).rows));
 });
 

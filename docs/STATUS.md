@@ -37,7 +37,8 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | **Criar perfis** de Instagram/TikTok/Facebook/Google via API | ⛔ | não existe API oficial para isso. Caminho: assistente guiado + conexão OAuth (próxima etapa) |
 | Conectar **Instagram + Facebook + Meta Ads** (login oficial da Meta) | ✅ testado com Graph API simulada · 🟡 precisa app Meta | tela **Conexões**; ver `docs/META_SETUP.md` |
 | Conectar **Google Meu Negócio** (login do Google, escolha do local) | ✅ testado com API simulada · 🟡 precisa projeto Google aprovado | ver `docs/GOOGLE_SETUP.md` |
-| Conectar TikTok | 🔲 falta | depende da auditoria do app no TikTok |
+| Conectar **TikTok** e publicar carrosséis de fotos (as artes, com música) | ✅ testado com API simulada · 🟡 precisa app TikTok | "Somente eu" até a auditoria do app; ver `docs/TIKTOK_SETUP.md`. Vídeos: o cliente grava a partir dos roteiros |
+| **Saúde das conexões**: acesso revogado/vencendo vira aviso de "Reconectar" | ✅ testado | publicação para de insistir na rede; Painel Master mostra quem precisa reconectar |
 
 ## 3. Conteúdo e tráfego pago
 
@@ -87,6 +88,7 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 | Item | Status |
 |---|---|
 | 2FA obrigatório: app autenticador (TOTP) ou código no WhatsApp | ✅ testado |
+| Código do autenticador vale uma única vez (anti-reuso/phishing) | ✅ testado |
 | Step-up 2FA para saque, kill switch, modo pânico, chave PIX, reset de acesso | ✅ |
 | Detecção de novo dispositivo, bloqueio após 5 senhas erradas, rate limit por IP e por e-mail | ✅ |
 | Sessão JWT em cookie httpOnly/secure/strict, revogação instantânea, renovação deslizante | ✅ |
@@ -104,10 +106,10 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 
 1. ~~Conexão Meta, publicação automática e métricas reais~~ ✅ feito (falta só criar o app na Meta: `docs/META_SETUP.md`).
 2. ~~Geração de artes em lote~~ ✅ feito. Com muito volume, mover as imagens do Postgres para um storage (S3/R2).
-3. ~~Campanhas Meta Ads pela tela~~ ✅ · ~~Google Meu Negócio~~ ✅ · ~~fotos por IA~~ ✅. Falta: aviso de renovação do token de anúncios (~60 dias).
-4. TikTok (conexão + publicação), depois da auditoria do app.
-5. Google Ads, Pagar.me e Zenvia.
-6. Testes automatizados de isolamento no CI (os roteiros de ponta a ponta usados nas revisões podem virar a base).
+3. ~~Campanhas Meta Ads pela tela~~ ✅ · ~~Google Meu Negócio~~ ✅ · ~~fotos por IA~~ ✅ · ~~aviso de renovação~~ ✅ · ~~TikTok~~ ✅
+4. ~~Testes automatizados no CI~~ ✅ — `.github/workflows/ci.yml`: unitários, 157 cenários de ponta a ponta (isolamento entre
+   clientes incluso) e build + teste de fumaça da imagem Docker a cada push/PR.
+5. Fora do escopo atual: Google Ads (developer token), Pagar.me, Zenvia, vídeos gerados automaticamente.
 
 ## Aprovações externas que levam semanas — começar já
 

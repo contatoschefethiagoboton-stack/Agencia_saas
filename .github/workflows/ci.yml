@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testes:
+    name: Testes (unitários + ponta a ponta)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Compilar (TypeScript)
+        run: npm run build
+      - name: Testes unitários
+        run: npm test
+      - name: Testes de ponta a ponta (Postgres sem superusuário, APIs externas simuladas)
+        run: npm run e2e
+        env:
+          E2E_PG_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres
+          E2E_REDIS_URL: redis://localhost:6379
+
+  painel:
+    name: Build do painel (React)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  docker:
+    name: Imagem Docker (a mesma do Render)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t agencia-saas .
+      - name: Sobe sem nenhuma configuração (Redis interno, sem banco) e responde
+        run: |
+          docker run -d --name app -p 3000:3000 agencia-saas
+          for i in $(seq 1 30); do curl -fs localhost:3000/healthz && break; sleep 1; done
+          curl -fs localhost:3000/healthz
+          curl -fs localhost:3000/ | grep -q '<div id="root">'
+          docker logs app
+      - name: Gerador de artes funciona no Alpine (binário musl + fontes)
+        run: |
+          docker run --rm --entrypoint node agencia-saas -e "
+            import('./dist/art/render.js').then(m => {
+              const r = m.renderArt({ template: 'oferta', format: 'feed', headline: 'Teste de arte', cta: 'Peça já',
+                brand: { name: 'Teste', primary: '#7A3E12', secondary: '#F2B33D' } });
+              if (r.width !== 1080 || r.jpg.length < 10000) throw new Error('arte inválida');
+              console.log('arte ok', r.width + 'x' + r.height, r.jpg.length, 'bytes');
+            })"

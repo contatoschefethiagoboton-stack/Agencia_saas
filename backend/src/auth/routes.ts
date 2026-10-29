@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { appPool, adminPool } from '../db.js';
 import { issueOtp, verifyOtp } from './otp.js';
 import { deviceHash, setSession, clearSession, readSession } from './session.js';
-import { newTotpSecret, otpauthUrl, verifyTotp } from './totp.js';
+import { newTotpSecret, otpauthUrl, totpStep } from './totp.js';
 import { encryptToken, decryptToken } from '../security/vault.js';
 import { audit } from '../audit/audit.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
@@ -16,6 +16,12 @@ import { redis } from '../redis.js';
 
 export const authRouter = Router();
 const DUMMY_HASH = await argon2.hash('senha-que-nao-existe');
+/** Código do autenticador vale UMA vez: reusar o mesmo código (ex.: capturado por phishing) é recusado. */
+async function totpOnce(userId: string, secret: string, code: string) {
+  const step = totpStep(secret, code);
+  if (step === null) return false;
+  return (await redis.set(`totp:used:${userId}:${step}`, '1', { NX: true, EX: 120 })) === 'OK';
+}
 const whatsappOtpReady = () => Boolean(process.env.WHATSAPP_SYSTEM_TOKEN && process.env.PLATFORM_WA_PHONE_ID);
 
 /*
@@ -80,9 +86,9 @@ authRouter.post('/login/verify', loginLimiter, async (req, res) => {
     const u0 = (await c.query(`SELECT totp_secret_cipher FROM users WHERE id = $1 FOR UPDATE`, [t.sub])).rows[0];
     let ok = false;
     if (t.method === 'whatsapp') ok = await verifyOtp(c, t.ch!, t.sub, 'login', body.data.code);
-    else if (t.method === 'totp') ok = Boolean(u0?.totp_secret_cipher) && verifyTotp(decryptToken(u0.totp_secret_cipher), body.data.code);
+    else if (t.method === 'totp') ok = Boolean(u0?.totp_secret_cipher) && await totpOnce(t.sub, decryptToken(u0.totp_secret_cipher), body.data.code);
     else if (t.method === 'totp_setup') {
-      ok = verifyTotp(t.sec!, body.data.code);
+      ok = await totpOnce(t.sub, t.sec!, body.data.code);
       if (ok) await c.query(`UPDATE users SET totp_secret_cipher = $2, totp_enabled = true WHERE id = $1`,
                             [t.sub, encryptToken(t.sec!)]);
     }
@@ -160,7 +166,7 @@ authRouter.post('/step-up/verify', requireAuth, async (req, res) => {
   let ok = false;
   try {
     const u = (await c.query(`SELECT totp_enabled, totp_secret_cipher FROM users WHERE id = $1`, [req.user!.sub])).rows[0];
-    if (u?.totp_enabled) ok = verifyTotp(decryptToken(u.totp_secret_cipher), b.code);
+    if (u?.totp_enabled) ok = await totpOnce(req.user!.sub, decryptToken(u.totp_secret_cipher), b.code);
     else if (b.challengeId) {
       await c.query('BEGIN');
       ok = await verifyOtp(c, b.challengeId, req.user!.sub, 'withdrawal', b.code);

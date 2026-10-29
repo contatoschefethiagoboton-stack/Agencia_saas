@@ -4,7 +4,9 @@ import { ProgressBar } from '../ui/Charts';
 import PainelCliente from './PainelCliente';
 import Metricas from './Metricas';
 
+const REDE: Record<string, string> = { facebook: 'Facebook', instagram: 'Instagram', meta_ads: 'Meta Ads', google_business: 'Google Meu Negócio', tiktok: 'TikTok' };
 interface Summary {
+  alertas: { provider: string; needs_reconnect: boolean; expiring: boolean; expires_at: string | null }[];
   negocio: { name: string; city: string | null; plan_name: string | null; posts_per_month: number | null };
   conteudo: Record<string, number>;
   ia: { cost_cents: string; quota_cents: string } | null;
@@ -26,6 +28,14 @@ export default function Resumo({ me }: { me: Me }) {
       <header className="page-head">
         <div><span className="eyebrow">{[me.tenant_name, s.negocio.city].filter(Boolean).join(' · ')}</span><h1>Olá{me.name ? `, ${me.name.split(' ')[0]}` : ''}</h1></div>
       </header>
+
+      {s.alertas.map(a => (
+        <section key={a.provider} className="row" role="alert" style={{ alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px',
+                 borderRadius: 16, background: 'var(--bad-bg)', border: '1px solid var(--bad)' }}>
+          <span><b>{REDE[a.provider] ?? a.provider}:</b> {a.needs_reconnect ? 'o acesso foi removido ou expirou. As publicações nesse canal estão paradas.'
+            : `o acesso vence em ${new Date(a.expires_at!).toLocaleDateString('pt-BR')}. Reconecte para não parar.`}</span>
+          <a className="btn btn-danger" href="#conexoes">Reconectar</a>
+        </section>))}
 
       {!s.dossie.completo && (
         <section className="card" style={{ borderColor: 'var(--accent)' }}>

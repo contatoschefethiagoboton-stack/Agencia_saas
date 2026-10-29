@@ -32,12 +32,15 @@ export function totpAt(secret: string, counter: number): string {
   return (n % 1_000_000).toString().padStart(6, '0');
 }
 
-/** Aceita o passo atual e um vizinho de cada lado (relógio do celular adiantado/atrasado até 30s). */
-export function verifyTotp(secret: string, code: string, now = Date.now()): boolean {
-  if (!/^\d{6}$/.test(code)) return false;
+/** Passo de tempo em que o código bate (atual ou um vizinho: relógio do celular até 30s fora), ou null. */
+export function totpStep(secret: string, code: string, now = Date.now()): number | null {
+  if (!/^\d{6}$/.test(code)) return null;
   const step = Math.floor(now / 30_000);
-  return [-1, 0, 1].some(d => crypto.timingSafeEqual(Buffer.from(totpAt(secret, step + d)), Buffer.from(code)));
+  for (const d of [-1, 0, 1]) if (crypto.timingSafeEqual(Buffer.from(totpAt(secret, step + d)), Buffer.from(code))) return step + d;
+  return null;
 }
+
+export const verifyTotp = (secret: string, code: string, now = Date.now()) => totpStep(secret, code, now) !== null;
 
 export const otpauthUrl = (secret: string, email: string, issuer = process.env.APP_NAME ?? 'Agencia Hub') =>
   `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(email)}?` +

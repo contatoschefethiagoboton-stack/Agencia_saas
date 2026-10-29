@@ -2,16 +2,19 @@ import { useEffect, useState } from 'react';
 import { api, dataHora } from '../api';
 import { useLoad } from '../ui/useLoad';
 
-interface Conn { provider: string; external_id: string; name: string | null; expires_at: string | null; connected_at: string }
+interface Conn { provider: string; external_id: string; name: string | null; expires_at: string | null; connected_at: string;
+                 needs_reconnect: boolean; last_error: string | null; expiring: boolean }
+const saude = (c: Conn) => c.needs_reconnect ? <span className="badge bad" title={c.last_error ?? ''}>Reconectar</span>
+  : c.expiring ? <span className="badge warn">Vence em breve</span> : <span className="badge good">Ok</span>;
 interface Pending { pages: { id: string; name: string; instagram: string | null }[]; adAccounts: { id: string; name: string; currency: string; status: number }[] }
 
 const NOMES: Record<string, string> = { facebook: 'Página do Facebook', instagram: 'Instagram profissional', meta_ads: 'Conta de anúncios (Meta Ads)',
-                                        google_business: 'Google Meu Negócio' };
+                                        google_business: 'Google Meu Negócio', tiktok: 'TikTok' };
 
 /** Conecta Facebook, Instagram e Meta Ads pelo login oficial da Meta. */
 export default function Conexoes({ query, isOwner }: { query: URLSearchParams; isOwner: boolean }) {
   const conns = useLoad<Conn[]>('/client/connections');
-  const features = useLoad<{ meta: boolean; google: boolean }>('/client/features');
+  const features = useLoad<{ meta: boolean; google: boolean; tiktok: boolean }>('/client/features');
   const nonce = query.get('meta');
   const gNonce = query.get('google');
   const [gPending, setGPending] = useState<{ id: string; title: string; address: string }[] | null>(null);
@@ -19,7 +22,8 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
   const [pending, setPending] = useState<Pending | null>(null);
   const [pick, setPick] = useState({ pageId: '', adAccountId: '' });
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err' | 'warn'; text: string } | null>(
-    query.get('erro') ? { kind: 'err', text: query.get('erro')! } : null);
+    query.get('erro') ? { kind: 'err', text: query.get('erro')! }
+      : query.get('tiktok') === 'ok' ? { kind: 'ok', text: 'TikTok conectado! Os carrosséis aprovados para o TikTok passam a ser publicados no horário.' } : null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -36,6 +40,12 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
       .then(r => { setGPending(r.locations); if (r.locations.length === 1) setGPick(r.locations[0].id); })
       .catch(e => setMsg({ kind: 'err', text: e.message }));
   }, [gNonce]);
+
+  async function startTiktok() {
+    setBusy(true); setMsg(null);
+    try { location.href = (await api<{ url: string }>('/client/connect/tiktok/start', { body: {} })).url; }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); setBusy(false); }
+  }
 
   async function startGoogle() {
     setBusy(true); setMsg(null);
@@ -126,7 +136,7 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
         {features.data && !features.data.google && <p className="card-sub">A agência ainda está ativando esta integração.</p>}
         {conns.data?.filter(c => c.provider === 'google_business').map(c => (
           <div key={c.provider} className="actions" style={{ justifyContent: 'space-between' }}>
-            <span><b>{c.name}</b> <span className="card-sub">· desde {dataHora(c.connected_at)}</span></span>
+            <span><b>{c.name}</b> {saude(c)} <span className="card-sub">· desde {dataHora(c.connected_at)}</span></span>
             {isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}
           </div>))}
       </section>
@@ -135,17 +145,32 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
         <div className="card-head" style={{ alignItems: 'center' }}>
           <div><h2>Facebook, Instagram e Meta Ads</h2>
             <span className="card-sub">Login oficial da Meta. A plataforma nunca vê sua senha; você pode remover o acesso quando quiser.</span></div>
-          {isOwner && <button className="btn btn-primary" disabled={busy} onClick={start}>{conns.data?.some(c => c.provider !== 'google_business') ? 'Reconectar' : 'Conectar com Facebook'}</button>}
+          {isOwner && <button className="btn btn-primary" disabled={busy} onClick={start}>{conns.data?.some(c => ['facebook', 'instagram', 'meta_ads'].includes(c.provider)) ? 'Reconectar' : 'Conectar com Facebook'}</button>}
         </div>
-        {conns.data?.some(c => c.provider !== 'google_business') ? (
+        {conns.data?.some(c => ['facebook', 'instagram', 'meta_ads'].includes(c.provider)) ? (
           <div className="table-wrap"><table className="tbl">
-            <tbody>{conns.data.filter(c => c.provider !== 'google_business').map(c => (
-              <tr key={c.provider}><td><b>{NOMES[c.provider] ?? c.provider}</b></td><td>{c.name ?? c.external_id}</td>
+            <tbody>{conns.data.filter(c => ['facebook', 'instagram', 'meta_ads'].includes(c.provider)).map(c => (
+              <tr key={c.provider}><td><b>{NOMES[c.provider] ?? c.provider}</b></td><td>{c.name ?? c.external_id} {saude(c)}</td>
                 <td className="card-sub">desde {dataHora(c.connected_at)}{c.expires_at ? ` · renovar até ${dataHora(c.expires_at)}` : ''}</td>
                 <td>{isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}</td></tr>))}
             </tbody></table></div>
         ) : <p className="card-sub">Nada conectado ainda.</p>}
         {!isOwner && <p className="card-sub">Só o responsável pela conta pode conectar ou desconectar.</p>}
+      </section>
+
+      <section className="card">
+        <div className="card-head" style={{ alignItems: 'center' }}>
+          <div><h2>TikTok</h2>
+            <span className="card-sub">Publica os carrosséis do calendário como posts de fotos com música. Vídeos continuam com você: os roteiros ficam em Aprovações.</span></div>
+          {isOwner && features.data?.tiktok && <button className="btn btn-primary" disabled={busy} onClick={startTiktok}>
+            {conns.data?.some(c => c.provider === 'tiktok') ? 'Reconectar' : 'Conectar com TikTok'}</button>}
+        </div>
+        {features.data && !features.data.tiktok && <p className="card-sub">A agência ainda está ativando esta integração.</p>}
+        {conns.data?.filter(c => c.provider === 'tiktok').map(c => (
+          <div key={c.provider} className="actions" style={{ justifyContent: 'space-between' }}>
+            <span><b>{c.name}</b> {saude(c)} <span className="card-sub">· desde {dataHora(c.connected_at)}</span></span>
+            {isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}
+          </div>))}
       </section>
 
       <section className="banner">

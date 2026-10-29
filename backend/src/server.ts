@@ -14,6 +14,7 @@ import { apiLimiter } from './middleware/rateLimit.js';
 import { clientRouter, approvalsRouter } from './client/routes.js';
 import { metaCallbackRouter } from './integrations/meta/oauth.js';
 import { googleCallbackRouter } from './integrations/google/google.js';
+import { tiktokCallbackRouter, tiktokVerifyRouter } from './integrations/tiktok/tiktok.js';
 import { servicePool } from './db.js';
 
 const app = express();
@@ -42,6 +43,8 @@ app.use('/webhooks/whatsapp', waWebhookRouter);    // Meta (HMAC) e Twilio (assi
 
 app.use('/oauth/meta', apiLimiter, metaCallbackRouter);   // retorno do login da Meta (sem sessão; state assinado)
 app.use('/oauth/google', apiLimiter, googleCallbackRouter);   // retorno do login do Google (idem)
+app.use('/oauth/tiktok', apiLimiter, tiktokCallbackRouter);   // retorno do login do TikTok (idem)
+app.use(tiktokVerifyRouter);                                    // arquivo de verificação de domínio do TikTok
 app.use('/api', apiLimiter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', requireAuth, adminRouter);
