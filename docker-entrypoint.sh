@@ -10,4 +10,5 @@ if [ -z "$REDIS_URL" ]; then
 fi
 
 node dist/migrate.js
+node dist/bootstrap.js        # cria o 1º admin se ADMIN_EMAIL/ADMIN_PASSWORD estiverem definidos
 exec "$@"

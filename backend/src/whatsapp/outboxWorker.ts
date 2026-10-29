@@ -3,6 +3,7 @@ import { servicePool, withTenant } from '../db.js';
 import { providerFor } from './registry.js';
 import { checkCadence } from './cadence.js';
 import { publish } from './realtime.js';
+import { isPanicking } from '../security/panic.js';
 
 // Códigos de erro da Cloud API que indicam risco ao número (conferir a lista vigente na doc da Meta)
 const SPAM_LIMIT = new Set([131048, 131056, 130429]);   // limite de spam / par / throughput
@@ -64,6 +65,7 @@ async function processItem(item: any) {
 
 export async function runOutboxWorker() {
   for (;;) {
+    if (await isPanicking()) { await new Promise(r => setTimeout(r, 5000)); continue; }   // fila fica parada
     const { rows } = await servicePool.query('SELECT * FROM wa_claim_outbox(25)');
     await Promise.allSettled(rows.map(processItem));
     if (!rows.length) await new Promise(r => setTimeout(r, 1000));

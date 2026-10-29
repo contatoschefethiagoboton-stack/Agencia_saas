@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { readSession, type Claims } from '../auth/session.js';
+import { readSession, setSession, type Claims } from '../auth/session.js';
 import { adminPool } from '../db.js';
 import { redis } from '../redis.js';
 
@@ -23,8 +23,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const { token_version, tenant_status } = JSON.parse(state);
   if (token_version !== s.tv) return res.status(401).json({ error: 'Sessão revogada' });
   if (tenant_status !== 'active') return res.status(423).json({ error: 'Conta suspensa. Fale com o suporte.' });
+  if (s.role !== 'platform_admin' && !s.tid) return res.status(403).end();
 
   req.user = s;
+  // sessão deslizante: quem está usando não cai a cada 30 min (o 2FA de step-up continua valendo 5 min)
+  const iat = (s as Claims & { iat?: number }).iat ?? 0;
+  if (Date.now() / 1000 - iat > 15 * 60) setSession(res, s);
   next();
 }
 

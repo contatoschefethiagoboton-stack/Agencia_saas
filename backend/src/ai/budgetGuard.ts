@@ -1,12 +1,16 @@
 import { withTenant } from '../db.js';
+import { assertNotPanicking } from '../security/panic.js';
 
 /** Teto de consumo de IA por cliente/mês. Bloqueia ANTES de chamar a API. */
 export async function guardedAiCall<T>(tenantId: string, estimateCents: number,
                                        call: () => Promise<{ result: T; costCents: number }>): Promise<T> {
+  await assertNotPanicking();
+  if (!process.env.ANTHROPIC_API_KEY) throw Object.assign(new Error('IA não configurada (ANTHROPIC_API_KEY)'), { status: 503 });
   const reserved = await withTenant(tenantId, async c => {
     const { rows } = await c.query(`
-      INSERT INTO api_usage (tenant_id, provider, period, cost_cents)
-      VALUES ($1, 'anthropic', date_trunc('month', now())::date, $2)
+      INSERT INTO api_usage (tenant_id, provider, period, cost_cents, quota_cents)
+      VALUES ($1, 'anthropic', date_trunc('month', now())::date, $2,
+              coalesce((SELECT p.ai_quota_cents FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1), 5000))
       ON CONFLICT (tenant_id, provider, period)
         DO UPDATE SET cost_cents = api_usage.cost_cents + EXCLUDED.cost_cents
         WHERE api_usage.cost_cents + EXCLUDED.cost_cents <= api_usage.quota_cents
@@ -15,7 +19,15 @@ export async function guardedAiCall<T>(tenantId: string, estimateCents: number,
   });
   if (!reserved) throw Object.assign(new Error('Limite mensal de IA atingido para este cliente'), { status: 429 });
 
-  const { result, costCents } = await call();
+  let out: { result: T; costCents: number };
+  try { out = await call(); }
+  catch (e) {   // falhou: devolve a reserva
+    await withTenant(tenantId, c => c.query(
+      `UPDATE api_usage SET cost_cents = greatest(cost_cents - $2, 0) WHERE tenant_id = $1 AND provider = 'anthropic'
+         AND period = date_trunc('month', now())::date`, [tenantId, estimateCents]));
+    throw e;
+  }
+  const { result, costCents } = out;
   // ajusta a reserva pelo custo real
   await withTenant(tenantId, c => c.query(
     `UPDATE api_usage SET cost_cents = cost_cents + $2 WHERE tenant_id = $1 AND provider = 'anthropic'

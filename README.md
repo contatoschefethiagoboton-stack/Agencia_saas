@@ -5,6 +5,12 @@ Este pacote é o **núcleo seguro**: multi-tenant, autenticação 2FA, financeir
 webhooks antifraude, auditoria imutável, Kill Switch, motor de conteúdo com fila de aprovação,
 Meta Ads e WhatsApp Cloud. Os demais módulos estão mapeados nas etapas abaixo.
 
+## Colocar no ar
+
+Veja **[docs/STATUS.md](docs/STATUS.md)**: passo a passo do deploy no Render e o que está pronto/faltando em cada módulo.
+Desenvolvimento local: `docker compose up -d` (Postgres + Redis), depois em `backend/` `npm run build && npm run migrate`,
+`node dist/bootstrap.js voce@email.com 'SenhaForte123'` e `npm run dev`; em `frontend/` `npm run dev`. Testes: `npm test` no backend.
+
 ## Estrutura
 
 ```

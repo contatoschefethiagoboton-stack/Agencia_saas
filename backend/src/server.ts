@@ -11,15 +11,17 @@ import { inboxRouter } from './whatsapp/inboxRoutes.js';
 import { adminRouter } from './admin/routes.js';
 import { requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
-import { withTenant } from './db.js';
-import { audit } from './audit/audit.js';
+import { clientRouter, approvalsRouter } from './client/routes.js';
 
 const app = express();
 app.set('trust proxy', 1);                   // atrás do proxy do Render/Cloudflare
 app.disable('x-powered-by');
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: { directives: { 'img-src': ["'self'", 'data:', 'https:'] } } }));
 app.use(cookieParser());
-app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { (req as any).rawBody = buf; } }));
+const rawBody = (req: any, _res: unknown, buf: Buffer) => { req.rawBody = buf; };
+const jsonSmall = express.json({ limit: '1mb', verify: rawBody });
+const jsonLarge = express.json({ limit: '15mb' });                 // só para o PDF do onboarding
+app.use((req, res, next) => (req.path === '/api/client/dossier/ingest' ? jsonLarge : jsonSmall)(req, res, next));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));   // health check do Render
 
@@ -31,25 +33,9 @@ app.use('/api/auth', authRouter);
 app.use('/api/admin', requireAuth, adminRouter);
 app.use('/api/whatsapp', requireAuth, inboxRouter);
 
-// ---------- Painel do cliente: fila de aprovação ----------
-app.get('/api/approvals', requireAuth, async (req, res) => {
-  const rows = await withTenant(req.user!.tid!, async c =>
-    (await c.query(`SELECT id, channel, kind, payload, scheduled_for FROM content_items
-                    WHERE status = 'pending_approval' ORDER BY scheduled_for`)).rows);
-  res.json(rows);
-});
-
-app.post('/api/approvals/:id', requireAuth, async (req, res) => {
-  const decision = req.body?.decision === 'approve' ? 'approved' : 'rejected';
-  await withTenant(req.user!.tid!, async c => {
-    const r = await c.query(`UPDATE content_items SET status = $1, decided_by = $2, decided_at = now()
-                             WHERE id = $3 AND status = 'pending_approval'`, [decision, req.user!.sub, req.params.id]);
-    if (!r.rowCount) throw Object.assign(new Error('Item não encontrado'), { status: 404 });
-    await audit({ actorId: req.user!.sub, tenantId: req.user!.tid, ip: req.ip,
-                  action: `content.${decision}`, target: req.params.id }, c);
-  });
-  res.json({ ok: true });
-});
+app.use('/api/client', requireAuth, clientRouter);
+app.use('/api/approvals', requireAuth, approvalsRouter);
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 
 // ---------- Painel React (build do Vite copiado para ./public no Docker) ----------
 const webDir = path.resolve(process.env.WEB_DIR ?? 'public');
@@ -66,3 +52,19 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 });
 
 app.listen(Number(process.env.PORT ?? 3000), () => console.log('API no ar'));
+
+// Sem Background Worker (ex.: plano free do Render), a fila do WhatsApp e a IA rodam neste mesmo processo.
+// Com um worker separado (node dist/workers.js), defina RUN_WORKERS_IN_WEB=0 no serviço web.
+if (process.env.RUN_WORKERS_IN_WEB !== '0' && (process.env.DATABASE_URL || process.env.DATABASE_URL_SERVICE)) {
+  const { runOutboxWorker } = await import('./whatsapp/outboxWorker.js');
+  const { runAiWorker } = await import('./whatsapp/aiAgent.js');
+  for (const [name, run] of [['fila WhatsApp', runOutboxWorker], ['IA WhatsApp', runAiWorker]] as const) {
+    (async function loop() {
+      for (;;) {
+        try { await run(); } catch (e) { console.error(`[worker ${name}]`, (e as Error).message); }
+        await new Promise(r => setTimeout(r, 10_000));   // caiu (ex.: banco fora): tenta de novo
+      }
+    })();
+  }
+  console.log('Workers rodando no mesmo processo da API');
+}
