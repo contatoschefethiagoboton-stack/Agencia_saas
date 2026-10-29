@@ -14,9 +14,13 @@ export const deviceHash = (req: Request) => {
 };
 
 export function setSession(res: Response, claims: Claims) {
-  const token = jwt.sign(claims, process.env.JWT_SECRET!, { expiresIn: '30m', algorithm: 'HS256' });
+  const { sub, tid, role, tv, mfaAt } = claims;          // nunca copia exp/iat de um token antigo
+  const token = jwt.sign({ sub, tid, role, tv, mfaAt }, process.env.JWT_SECRET!, { expiresIn: '30m', algorithm: 'HS256' });
   res.cookie('sid', token, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 30 * 60_000 });
 }
+
+export const clearSession = (res: Response) =>
+  res.clearCookie('sid', { httpOnly: true, secure: true, sameSite: 'strict' });
 
 export function readSession(req: Request): Claims | null {
   try { return jwt.verify(req.cookies?.sid ?? '', process.env.JWT_SECRET!, { algorithms: ['HS256'] }) as Claims; }

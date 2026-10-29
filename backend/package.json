@@ -2,7 +2,15 @@
   "name": "agencia-saas-backend",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "tsx watch src/server.ts", "build": "tsc", "start": "node dist/server.js", "workers": "node dist/workers.js", "migrate": "node dist/migrate.js" },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "workers": "node dist/workers.js",
+    "migrate": "node dist/migrate.js",
+    "bootstrap": "node dist/bootstrap.js",
+    "test": "tsx --test test/*.test.ts"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "argon2": "^0.41.0",
@@ -13,13 +21,18 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.0",
+    "qrcode": "^1.5.4",
     "rate-limit-redis": "^4.2.0",
     "redis": "^4.7.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/cookie-parser": "^1.4.7", "@types/express": "^4.17.21",
-    "@types/jsonwebtoken": "^9.0.7", "@types/pg": "^8.11.10",
-    "tsx": "^4.19.0", "typescript": "^5.6.0"
+    "@types/cookie-parser": "^1.4.7",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.6",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   }
 }

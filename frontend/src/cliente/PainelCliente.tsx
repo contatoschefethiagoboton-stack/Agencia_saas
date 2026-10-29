@@ -9,7 +9,7 @@ const dicas = ['Pessoas diferentes que viram seus posts e anúncios', 'Conversas
                'Pedidos e encomendas fechados no WhatsApp', 'Quanto cada novo contato custou em anúncios'];
 const rotulos = ['Pessoas alcançadas', 'Mensagens recebidas', 'Encomendas pelo WhatsApp', 'Custo por contato'];
 
-/** Painel do negócio: resultado de conteúdo, anúncios e WhatsApp. */
+/** Prévia dos relatórios de alcance, anúncios e WhatsApp (dados de exemplo até as integrações estarem conectadas). */
 export default function PainelCliente() {
   const [periodo, setPeriodo] = useState<PeriodoCliente>('mes');
   const D = cliente.series[periodo];
@@ -19,21 +19,11 @@ export default function PainelCliente() {
 
   return (
     <>
-      <header className="page-head">
-        <div><span className="eyebrow">{cliente.nome}</span><h1>Como foi seu {D.nome}</h1></div>
+      <header className="page-head" style={{ marginTop: 16 }}>
+        <div><span className="eyebrow">Prévia dos relatórios</span><h2 style={{ margin: 0, fontSize: 24 }}>Como foi seu {D.nome}</h2></div>
         <Segmented label="Período" value={periodo} onChange={setPeriodo} options={[['semana', 'Semana'], ['mes', 'Mês']]} />
       </header>
-
-      {cliente.pendentes > 0 && (
-        <section className="row" style={{ alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px',
-                 borderRadius: 16, background: '#2A2216', border: '1px solid #4A3A1E' }}>
-          <div style={{ display: 'grid', gap: 4 }}>
-            <b style={{ fontSize: 17 }}>{cliente.pendentes} conteúdos esperam sua aprovação</b>
-            <span style={{ fontSize: 14, color: '#E2C9A3' }}>Revise antes do horário agendado para não atrasar as publicações.</span>
-          </div>
-          <a className="btn btn-orange" href="#aprovacoes">Revisar agora</a>
-        </section>
-      )}
+      <p className="banner">Números de exemplo. Os seus aparecem aqui quando Instagram, Google e Meta Ads estiverem conectados à plataforma.</p>
 
       <section className="grid-kpi" aria-label="Indicadores">
         {rotulos.map((label, i) => (

@@ -1,8 +1,12 @@
-import { withService } from '../../db.js';
+import { withTenant, servicePool } from '../../db.js';
+import { decryptToken } from '../../security/vault.js';
+import { assertNotPanicking } from '../../security/panic.js';
 
 const G = () => `https://graph.facebook.com/${process.env.META_API_VERSION}`;
 
 async function graph(path: string, token: string, body?: Record<string, unknown>) {
+  // pausar campanha é sempre permitido, mesmo em modo pânico (é o que o pânico quer)
+  if (!(body && body.status === 'PAUSED' && Object.keys(body).length === 1)) await assertNotPanicking();
   const r = await fetch(`${G()}/${path}`, {
     method: body ? 'POST' : 'GET',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -45,13 +49,21 @@ export async function createLocalCampaign(opts: {
 export const setCampaignStatus = (campaignId: string, token: string, status: 'ACTIVE' | 'PAUSED') =>
   graph(campaignId, token, { status });
 
-/** Usado pelo Kill Switch. Obtém tokens decifrados do cofre (implementar decryptToken). */
+/** Usado pelo Kill Switch e pelo Modo Pânico: pausa na Meta todas as campanhas do cliente. */
 export async function pauseAllTenantCampaigns(tenantId: string) {
-  const rows = await withService(async c => {
-    await c.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
-    return (await c.query(`SELECT external_campaign_id FROM ad_campaigns
-                           WHERE platform = 'meta' AND external_campaign_id IS NOT NULL`)).rows;
-  });
-  // for (const r of rows) await setCampaignStatus(r.external_campaign_id, await decryptToken(...), 'PAUSED');
-  return rows.length;
+  const { rows, token } = await withTenant(tenantId, async c => {
+    const rows = (await c.query(`SELECT id, external_campaign_id FROM ad_campaigns
+                                 WHERE platform = 'meta' AND external_campaign_id IS NOT NULL AND status <> 'paused'`)).rows;
+    const conn = (await c.query(`SELECT token_cipher FROM channel_connections WHERE provider = 'meta_ads' LIMIT 1`)).rows[0];
+    return { rows, token: conn ? decryptToken(conn.token_cipher) : null };
+  }, servicePool);
+  let paused = 0;
+  for (const r of rows) {
+    try {
+      if (token) await setCampaignStatus(r.external_campaign_id, token, 'PAUSED');
+      await withTenant(tenantId, c => c.query(`UPDATE ad_campaigns SET status = 'paused' WHERE id = $1`, [r.id]), servicePool);
+      paused++;
+    } catch (e) { console.error('[meta-ads] falha ao pausar', r.external_campaign_id, e); }
+  }
+  return paused;
 }

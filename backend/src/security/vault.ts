@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 
 /** AES-256-GCM para tokens OAuth/WABA guardados no banco. Chave fica fora do banco (.env/KMS). */
-const key = () => Buffer.from(process.env.TOKEN_ENC_KEY!, 'base64');
+const key = () => {
+  const k = Buffer.from(process.env.TOKEN_ENC_KEY ?? '', 'base64');
+  if (k.length !== 32) throw new Error('TOKEN_ENC_KEY precisa ser base64 de 32 bytes (openssl rand -base64 32)');
+  return k;
+};
 
 export function encryptToken(plain: string): Buffer {
   const iv = crypto.randomBytes(12);

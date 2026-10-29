@@ -37,6 +37,12 @@ services:
       - key: WITHDRAWAL_DAILY_CAP_CENTS
         value: "2000000"
       # Preenchidos por você no painel do Render (sync: false = o Render pergunta na criação)
+      - key: ADMIN_EMAIL          # cria o 1º administrador no deploy
+        sync: false
+      - key: ADMIN_PASSWORD       # mínimo 10 caracteres; troque depois do 1º login
+        sync: false
+      - key: ASAAS_SPLIT_JSON     # split nativo: [{"walletId":"...","percentualValue":20}]
+        sync: false
       - key: PUBLIC_URL
         sync: false
       - key: ANTHROPIC_API_KEY
@@ -73,8 +79,8 @@ services:
     plan: free
     ipAllowList: []          # só acessível pela rede interna do Render
 
-  # Workers (fila do WhatsApp + IA). Background Worker não existe no plano free;
-  # descomente quando for usar (plano starter).
+  # Workers (fila do WhatsApp + IA). No plano free eles rodam dentro do serviço web.
+  # Para escalar, descomente e defina RUN_WORKERS_IN_WEB=0 no serviço web.
   # - type: worker
   #   name: agencia-workers
   #   runtime: docker

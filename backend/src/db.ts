@@ -33,5 +33,6 @@ export const withTenant = <T>(tenantId: string, fn: Fn<T>, pool = appPool) =>
 /** Operações financeiras (ledger) — nunca expostas diretamente a rotas de cliente. */
 export const withService = <T>(fn: Fn<T>) => tx(servicePool, async () => {}, fn);
 
-/** Painel Master — só chamado depois de requireAdmin + step-up 2FA. */
-export const withAdmin = <T>(fn: Fn<T>) => tx(adminPool, async () => {}, fn);
+/** Painel Master — só chamado depois de requireAdmin. Enxerga todos os tenants (política admin_bypass). */
+export const withAdmin = <T>(fn: Fn<T>) =>
+  tx(adminPool, c => c.query("SELECT set_config('app.bypass_rls', 'on', true)").then(() => {}), fn);
