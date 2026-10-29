@@ -2,6 +2,7 @@ import { withTenant } from '../../db.js';
 import { redis } from '../../redis.js';
 import { decryptToken } from '../../security/vault.js';
 import { graphGet } from './graph.js';
+import { isAuthError, markReconnect } from '../health.js';
 
 /*
  * MÉTRICAS REAIS do painel do cliente: Instagram (conta profissional) e Meta Ads.
@@ -28,7 +29,7 @@ export async function clientMetrics(tenantId: string, days: 7 | 30) {
     try {
       const prof = await graphGet(ig.external_id, t, { fields: 'followers_count,media_count,username' });
       out.instagram.seguidores = prof.followers_count; out.instagram.posts = prof.media_count;
-    } catch (e) { out.erros.push(`Instagram (perfil): ${(e as Error).message}`); }
+    } catch (e) { out.erros.push(`Instagram (perfil): ${(e as Error).message}`); if (isAuthError(e)) await markReconnect(tenantId, 'instagram', e); }
     try {
       const tot = await graphGet(`${ig.external_id}/insights`, t, { metric: 'reach,views,accounts_engaged,total_interactions',
         period: 'day', metric_type: 'total_value', since: String(since), until: String(until) });
@@ -57,7 +58,7 @@ export async function clientMetrics(tenantId: string, days: 7 | 30) {
       out.anuncios = { conta: ads.name, gasto: Number(d.spend ?? 0), alcance: Number(d.reach ?? 0), cliques: Number(d.clicks ?? 0),
                        cpc: d.cpc ? Number(d.cpc) : null,
                        conversas: act('onsite_conversion.messaging_conversation_started_7d'), cliquesLink: act('link_click') };
-    } catch (e) { out.erros.push(`Meta Ads: ${(e as Error).message}`); }
+    } catch (e) { out.erros.push(`Meta Ads: ${(e as Error).message}`); if (isAuthError(e)) await markReconnect(tenantId, 'meta_ads', e); }
   }
 
   await redis.set(key, JSON.stringify(out), { EX: 900 });

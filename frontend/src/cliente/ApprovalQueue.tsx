@@ -17,7 +17,7 @@ const kindName: Record<string, string> = { post: 'Post', carousel: 'Carrossel', 
 const COLS: [string[], string][] = [[['pending_approval'], 'Para aprovar'], [['changes_requested'], 'Ajuste pedido'],
   [['approved', 'publishing', 'failed'], 'Agendados'], [['published'], 'Publicados']];
 const AUTO = (it: Item) => (['instagram', 'facebook'].includes(it.channel) && ['post', 'carousel', 'story'].includes(it.kind))
-  || (it.channel === 'google_business' && it.kind === 'gbp_post');
+  || (it.channel === 'google_business' && it.kind === 'gbp_post') || (it.channel === 'tiktok' && ['post', 'carousel'].includes(it.kind));
 const imagesOf = (p: Item['payload']) => p.images?.length ? p.images : p.image_url ? [p.image_url] : [];
 
 /** Filtro humano: o cliente só olha, aprova tudo de uma vez ou pede ajuste em texto. */
@@ -181,8 +181,8 @@ function Card({ it, busy, onDecide, onRetry, onPublishRetry, onMedia, onArt, pho
       ))}
 
       {it.status === 'approved' && !AUTO(it) && <p className="card-sub">{it.kind === 'reel_script' ? 'Roteiro para você gravar e postar.' : 'Publicação neste canal ainda é manual.'}</p>}
-      {it.status === 'approved' && AUTO(it) && (it.channel === 'instagram' && !imgs.length
-        ? <p className="msg warn">Sem arte, o Instagram não aceita a publicação. Clique em "Gerar arte".</p>
+      {it.status === 'approved' && AUTO(it) && (['instagram', 'tiktok'].includes(it.channel) && !imgs.length
+        ? <p className="msg warn">Sem arte, o {it.channel === 'tiktok' ? 'TikTok' : 'Instagram'} não aceita a publicação. Clique em "Gerar arte".</p>
         : <p className="card-sub">Será publicado automaticamente no horário.</p>)}
       {it.status === 'publishing' && <span className="badge warn">Publicando…</span>}
       {it.status === 'failed' && <>

@@ -46,7 +46,9 @@ export async function googleAccessToken(tenantId: string, refreshCipher: Buffer)
   const key = `gtoken:${tenantId}`;
   const hit = await redis.get(key);
   if (hit) return hit;
-  const t = await tokenRequest({ grant_type: 'refresh_token', refresh_token: decryptToken(refreshCipher) });
+  let t;
+  try { t = await tokenRequest({ grant_type: 'refresh_token', refresh_token: decryptToken(refreshCipher) }); }
+  catch (e) { throw Object.assign(new Error(`invalid_grant: ${(e as Error).message}`), { status: 502 }); }   // acesso removido pelo cliente
   await redis.set(key, t.access_token, { EX: Math.max(60, t.expires_in - 120) });
   return t.access_token;
 }

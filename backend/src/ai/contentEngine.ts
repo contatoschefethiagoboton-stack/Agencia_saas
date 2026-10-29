@@ -77,6 +77,7 @@ Roteiros de vídeo (kind reel_script, canais tiktok/instagram) com cenas de 15�
 "template" = modelo de arte: "oferta", "bastidores", "dica", "depoimento" ou "destaque".
 Para posts, carrosséis e stories, a arte é gerada a partir de: "headline" (frase forte de até 50 caracteres, sem emoji nem hashtag),
 "subline" (apoio de até 110 caracteres, opcional), "cta" (até 24 caracteres, ex.: "Peça no WhatsApp").
+Carrosséis podem ir para "instagram" ou "tiktok" (no TikTok viram carrossel de fotos com música; prefira dicas e listas).
 Em carrosséis, "slides" tem de 3 a 7 frases curtas (até 90 caracteres cada), uma por slide; a capa usa "headline".
 Depoimento só com depoimento REAL que esteja no dossiê; se não houver, não use esse modelo.`,
       messages: [{ role: 'user', content:

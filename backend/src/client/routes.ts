@@ -13,6 +13,8 @@ import { generatePhoto, imagesReady } from '../ai/images.js';
 import { googleConnectRouter, googleReady } from '../integrations/google/google.js';
 import { metaReady } from '../integrations/meta/graph.js';
 import { adsRouter } from './ads.js';
+import { tiktokConnectRouter, tiktokReady } from '../integrations/tiktok/tiktok.js';
+import { connectionAlerts } from '../integrations/health.js';
 
 /** Painel do negócio. Tudo passa por withTenant: o RLS garante que um cliente nunca vê dados de outro. */
 export const clientRouter = Router();
@@ -37,23 +39,27 @@ clientRouter.get('/summary', async (req, res) => {
     const canais = (await c.query(`SELECT provider FROM channel_connections`)).rows.map(r => r.provider);
     const campanhas = (await c.query(`SELECT platform, status, monthly_budget_cents::text FROM ad_campaigns`)).rows;
     const filled = dossier ? Object.values(dossier.data).filter(v => v && (!Array.isArray(v) || v.length)).length : 0;
-    return { negocio: t, conteudo: Object.fromEntries(content.map(r => [r.status, r.n])), ia: ia ?? null, whatsapp: wa,
+    const alertas = await connectionAlerts(tid(req));
+    return { alertas, negocio: t, conteudo: Object.fromEntries(content.map(r => [r.status, r.n])), ia: ia ?? null, whatsapp: wa,
              dossie: { completo: filled >= 6, campos: filled, atualizado: dossier?.updated_at ?? null }, canais, campanhas };
   }));
 });
 
 // ---------- O que está ligado nesta instalação (a tela esconde o que não existe) ----------
 clientRouter.get('/features', (_req, res) => res.json({
-  meta: metaReady(), google: googleReady(), fotosIA: imagesReady(), textoIA: Boolean(process.env.ANTHROPIC_API_KEY) }));
+  meta: metaReady(), google: googleReady(), tiktok: tiktokReady(), fotosIA: imagesReady(), textoIA: Boolean(process.env.ANTHROPIC_API_KEY) }));
 
 // ---------- Conexões com redes sociais ----------
 clientRouter.use('/connect/meta', metaConnectRouter);
 clientRouter.use('/connect/google', googleConnectRouter);
+clientRouter.use('/connect/tiktok', tiktokConnectRouter);
 clientRouter.use('/ads', adsRouter);
 
 clientRouter.get('/connections', async (req, res) => {
   res.json(await withTenant(tid(req), async c => (await c.query(
-    `SELECT provider, external_id, name, expires_at, connected_at FROM channel_connections ORDER BY provider`)).rows));
+    `SELECT provider, external_id, name, expires_at, connected_at, needs_reconnect, last_error,
+            expires_at IS NOT NULL AND expires_at < now() + interval '10 days' AS expiring
+       FROM channel_connections ORDER BY provider`)).rows));
 });
 
 clientRouter.delete('/connections/:provider', async (req, res) => {
@@ -63,7 +69,7 @@ clientRouter.delete('/connections/:provider', async (req, res) => {
     await c.query(`DELETE FROM channel_connections WHERE provider = $1`, [provider]);
     await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'channels.disconnected', target: provider }, c);
   });
-  await redis.del([`metrics:${tid(req)}:7`, `metrics:${tid(req)}:30`, `gtoken:${tid(req)}`]);
+  await redis.del([`metrics:${tid(req)}:7`, `metrics:${tid(req)}:30`, `gtoken:${tid(req)}`, `ttoken:${tid(req)}`]);
   res.json({ ok: true });
 });
 

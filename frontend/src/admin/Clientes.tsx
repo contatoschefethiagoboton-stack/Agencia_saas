@@ -4,7 +4,8 @@ import { useLoad } from '../ui/useLoad';
 import { useStepUp } from '../auth/StepUp';
 
 interface Tenant { id: string; name: string; niche: string | null; city: string | null; plan: string; status: string;
-  suspended_reason: string | null; owner_email: string | null; cobranca_ativa: boolean; wa_ativos: number; wa_qualidade: string | null }
+  suspended_reason: string | null; owner_email: string | null; cobranca_ativa: boolean; wa_ativos: number; wa_qualidade: string | null;
+  conexoes_atencao: number }
 interface Plan { id: string; name: string; price_cents: string }
 
 const statusBadge = (t: Tenant) => t.status === 'active' ? <span className="badge good">Ativo</span>
@@ -57,7 +58,7 @@ export default function Clientes() {
                             style={{ background: 'var(--card-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 6 }}>
                   {plans?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                   <div className="card-sub">{t.cobranca_ativa ? 'cobrança ativa' : 'sem cobrança'}</div></td>
-                <td>{statusBadge(t)}</td>
+                <td>{statusBadge(t)}{t.conexoes_atencao > 0 && <div><span className="badge warn">{t.conexoes_atencao} conexão(ões) para reconectar</span></div>}</td>
                 <td>{t.wa_ativos ? <span className={`badge ${t.wa_qualidade === 'RED' ? 'bad' : t.wa_qualidade === 'YELLOW' ? 'warn' : 'good'}`}>{t.wa_ativos} ativo(s)</span> : <span className="card-sub">—</span>}</td>
                 <td className="mono">{t.owner_email}</td>
                 <td><div className="actions">

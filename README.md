@@ -8,6 +8,10 @@ Meta Ads e WhatsApp Cloud. Os demais módulos estão mapeados nas etapas abaixo.
 ## Colocar no ar
 
 Veja **[docs/STATUS.md](docs/STATUS.md)**: passo a passo do deploy no Render e o que está pronto/faltando em cada módulo.
+Integrações: [Meta](docs/META_SETUP.md) · [Google Meu Negócio](docs/GOOGLE_SETUP.md) · [TikTok](docs/TIKTOK_SETUP.md).
+
+**Testes:** `npm test` (unitários) e `npm run e2e` (ponta a ponta, precisa de Postgres e Redis; ver `backend/e2e/run.mjs`)
+no backend. O GitHub Actions roda tudo a cada push/PR, inclusive o build da imagem Docker.
 Desenvolvimento local: `docker compose up -d` (Postgres + Redis), depois em `backend/` `npm run build && npm run migrate`,
 `node dist/bootstrap.js voce@email.com 'SenhaForte123'` e `npm run dev`; em `frontend/` `npm run dev`. Testes: `npm test` no backend.
 

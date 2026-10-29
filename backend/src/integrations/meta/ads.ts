@@ -4,6 +4,7 @@ import { decryptToken } from '../../security/vault.js';
 import { isPanicking } from '../../security/panic.js';
 import { audit } from '../../audit/audit.js';
 import { graphGet, graphPost } from './graph.js';
+import { isAuthError, markReconnect } from '../health.js';
 
 /*
  * TRÁFEGO LOCAL SEM GERENCIADOR DE ANÚNCIOS
@@ -126,7 +127,10 @@ export async function runAdsGuard() {
   for (;;) {
     if (!(await isPanicking())) {
       const { rows } = await servicePool.query('SELECT * FROM ads_active_campaigns()');
-      for (const r of rows) await checkSpend(r.tenant_id, r.id).catch(e => console.error('[vigia de verba]', (e as Error).message));
+      for (const r of rows) await checkSpend(r.tenant_id, r.id).catch(async e => {
+        console.error('[vigia de verba]', (e as Error).message);
+        if (isAuthError(e)) await markReconnect(r.tenant_id, 'meta_ads', e);   // sem acesso não dá para vigiar: avisa o cliente
+      });
     }
     await new Promise(r => setTimeout(r, Number(process.env.ADS_GUARD_INTERVAL_MS ?? 15 * 60_000)));
   }

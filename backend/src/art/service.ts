@@ -10,7 +10,7 @@ const NICHE_COLORS: [RegExp, string, string][] = [
   [/est[eé]tica|beleza|unha|sal[aã]o/, '#8E3B6A', '#F4B6C2'], [/pet/, '#2F6B3F', '#F4A259'],
   [/academia|fitness|personal/, '#111827', '#22C55E'], [/influenc|criador/, '#5B21B6', '#F472B6'],
 ];
-const AUTO_CHANNELS = ['instagram', 'facebook', 'google_business'], AUTO_KINDS = ['post', 'carousel', 'story', 'gbp_post'];
+const AUTO_CHANNELS = ['instagram', 'facebook', 'google_business', 'tiktok'], AUTO_KINDS = ['post', 'carousel', 'story', 'gbp_post'];
 
 /** Tira emoji e símbolos que a fonte não tem (viram quadradinhos na arte) e hashtags. */
 const clean = (s: string) => s.replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu, '').replace(/#[\p{L}\p{N}_]+/gu, '')
