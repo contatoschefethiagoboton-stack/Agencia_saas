@@ -51,6 +51,8 @@ services:
         sync: false
       - key: META_APP_SECRET
         sync: false
+      - key: META_LOGIN_CONFIG_ID   # opcional: configuração do "Login do Facebook para Empresas"
+        sync: false
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
       - key: WHATSAPP_SYSTEM_TOKEN

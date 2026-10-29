@@ -4,6 +4,9 @@ import { withTenant } from '../db.js';
 import { audit } from '../audit/audit.js';
 import { generateMonthlyCalendar, ingestDossier, reviseItem } from '../ai/contentEngine.js';
 import { htmlToText, safeFetchText } from '../security/safeFetch.js';
+import { metaConnectRouter } from '../integrations/meta/oauth.js';
+import { clientMetrics } from '../integrations/meta/insights.js';
+import { redis } from '../redis.js';
 
 /** Painel do negócio. Tudo passa por withTenant: o RLS garante que um cliente nunca vê dados de outro. */
 export const clientRouter = Router();
@@ -31,6 +34,31 @@ clientRouter.get('/summary', async (req, res) => {
     return { negocio: t, conteudo: Object.fromEntries(content.map(r => [r.status, r.n])), ia: ia ?? null, whatsapp: wa,
              dossie: { completo: filled >= 6, campos: filled, atualizado: dossier?.updated_at ?? null }, canais, campanhas };
   }));
+});
+
+// ---------- Conexões com redes sociais ----------
+clientRouter.use('/connect/meta', metaConnectRouter);
+
+clientRouter.get('/connections', async (req, res) => {
+  res.json(await withTenant(tid(req), async c => (await c.query(
+    `SELECT provider, external_id, name, expires_at, connected_at FROM channel_connections ORDER BY provider`)).rows));
+});
+
+clientRouter.delete('/connections/:provider', async (req, res) => {
+  if (req.user!.role !== 'owner') return res.status(403).json({ error: 'Só o responsável pela conta pode desconectar' });
+  const provider = z.enum(['facebook', 'instagram', 'meta_ads', 'tiktok', 'google_business', 'google_ads']).parse(req.params.provider);
+  await withTenant(tid(req), async c => {
+    await c.query(`DELETE FROM channel_connections WHERE provider = $1`, [provider]);
+    await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'channels.disconnected', target: provider }, c);
+  });
+  await redis.del([`metrics:${tid(req)}:7`, `metrics:${tid(req)}:30`]);
+  res.json({ ok: true });
+});
+
+/** Métricas reais (Instagram + Meta Ads) quando as contas estão conectadas. */
+clientRouter.get('/metrics', async (req, res) => {
+  const days = req.query.days === '7' ? 7 : 30;
+  res.json(await clientMetrics(tid(req), days));
 });
 
 // ---------- Dossiê (memória do comércio) ----------
@@ -76,7 +104,7 @@ clientRouter.post('/content/generate', async (req, res) => {
 clientRouter.get('/content', async (req, res) => {
   const month = z.string().regex(/^\d{4}-\d{2}$/).default(new Date().toISOString().slice(0, 7)).parse(req.query.month);
   res.json(await withTenant(tid(req), async c => (await c.query(
-    `SELECT id, channel, kind, payload, status, feedback, revision, scheduled_for FROM content_items
+    `SELECT id, channel, kind, payload, status, feedback, revision, scheduled_for, error, permalink, published_at FROM content_items
       WHERE to_char(scheduled_for AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $1 ORDER BY scheduled_for`, [month])).rows));
 });
 
@@ -98,6 +126,31 @@ approvalsRouter.post('/approve-all', async (req, res) => {
     return r.rowCount;
   });
   res.json({ ok: true, aprovados: n });
+});
+
+/** Arte do post: link público da imagem (Canva, Drive público, site). Instagram exige imagem. */
+approvalsRouter.put('/:id/media', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const images = z.array(z.string().url().regex(/^https:\/\//, 'Use um link https')).max(10).parse(req.body?.images);
+  await withTenant(tid(req), async c => {
+    const r = await c.query(`UPDATE content_items SET payload = payload - 'image_url' || jsonb_build_object('images', $2::jsonb)
+                             WHERE id = $1 AND status IN ('pending_approval', 'changes_requested', 'approved', 'failed')`,
+                            [id, JSON.stringify(images)]);
+    if (!r.rowCount) throw Object.assign(new Error('Este conteúdo não pode mais ser alterado'), { status: 409 });
+  });
+  res.json({ ok: true });
+});
+
+/** Publicação falhou: o cliente confere e manda de novo (nunca é repetida sozinha, para não duplicar post). */
+approvalsRouter.post('/:id/retry', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  await withTenant(tid(req), async c => {
+    const r = await c.query(`UPDATE content_items SET status = 'approved', error = NULL, scheduled_for = greatest(scheduled_for, now())
+                             WHERE id = $1 AND status = 'failed'`, [id]);
+    if (!r.rowCount) throw Object.assign(new Error('Só dá para tentar de novo o que falhou'), { status: 409 });
+    await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'content.retry', target: id }, c);
+  });
+  res.json({ ok: true });
 });
 
 approvalsRouter.post('/:id/revise', async (req, res) => {

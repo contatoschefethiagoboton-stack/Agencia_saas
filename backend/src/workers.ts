@@ -5,5 +5,6 @@
 import 'express-async-errors';
 import { runOutboxWorker } from './whatsapp/outboxWorker.js';
 import { runAiWorker } from './whatsapp/aiAgent.js';
+import { runPublisher } from './integrations/meta/publish.js';
 
-await Promise.all([runOutboxWorker(), runAiWorker()]);
+await Promise.all([runOutboxWorker(), runAiWorker(), runPublisher()]);

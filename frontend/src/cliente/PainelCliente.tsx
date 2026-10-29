@@ -23,7 +23,7 @@ export default function PainelCliente() {
         <div><span className="eyebrow">Prévia dos relatórios</span><h2 style={{ margin: 0, fontSize: 24 }}>Como foi seu {D.nome}</h2></div>
         <Segmented label="Período" value={periodo} onChange={setPeriodo} options={[['semana', 'Semana'], ['mes', 'Mês']]} />
       </header>
-      <p className="banner">Números de exemplo. Os seus aparecem aqui quando Instagram, Google e Meta Ads estiverem conectados à plataforma.</p>
+      <p className="banner">Números de exemplo. Os seus aparecem aqui assim que o Instagram ou o Meta Ads forem conectados.</p>
 
       <section className="grid-kpi" aria-label="Indicadores">
         {rotulos.map((label, i) => (

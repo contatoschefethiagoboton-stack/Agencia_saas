@@ -30,5 +30,5 @@ export function donut(parts: number[], r: number) {
   return parts.map(p => { const s = { dash: `${(p * C - 2).toFixed(1)} ${C.toFixed(1)}`, offset: (-acc * C).toFixed(1) }; acc += p; return s; });
 }
 
-export const ticks = (max: number) =>
-  [1, 0.75, 0.5, 0.25, 0].map(f => (f === 0 ? '0' : `${(max * f).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`));
+export const ticks = (max: number, unit = ' mil') =>
+  [1, 0.75, 0.5, 0.25, 0].map(f => (f === 0 ? '0' : `${(max * f).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}${unit}`));

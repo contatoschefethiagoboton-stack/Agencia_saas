@@ -14,11 +14,13 @@ export function Sparkline({ vals, color, fill = true, width = '100%', height = 4
 export interface Series { name: string; vals: number[]; color: string; area?: boolean }
 
 /** Gráfico de linhas com eixo Y em "mil" e rótulos no eixo X. */
-export function LineChart({ series, labels, max, label, height = 240 }:
-  { series: Series[]; labels: string[]; max: number; label: string; height?: number }) {
+export function LineChart({ series, labels, max, label, height = 240, unit }:
+  { series: Series[]; labels: string[]; max: number; label: string; height?: number; unit?: string }) {
+  const every = Math.ceil(labels.length / 8);                 // no máximo ~8 rótulos no eixo X
+  const shown = labels.filter((_, i) => i % every === 0);
   return (
     <div className="chart">
-      <div className="chart-y" style={{ height }}>{ticks(max).map(t => <span key={t}>{t}</span>)}</div>
+      <div className="chart-y" style={{ height }}>{ticks(max, unit).map(t => <span key={t}>{t}</span>)}</div>
       <div className="chart-body">
         <svg viewBox={`0 0 800 ${height}`} preserveAspectRatio="none" style={{ height }} role="img" aria-label={label}>
           <path d={`M0,0.5 H800 M0,${height / 4} H800 M0,${height / 2} H800 M0,${(height * 3) / 4} H800 M0,${height - 0.5} H800`}
@@ -29,7 +31,7 @@ export function LineChart({ series, labels, max, label, height = 240 }:
                   vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
           ))}
         </svg>
-        <div className="chart-x">{labels.map(l => <span key={l}>{l}</span>)}</div>
+        <div className="chart-x">{shown.map(l => <span key={l}>{l}</span>)}</div>
       </div>
     </div>
   );

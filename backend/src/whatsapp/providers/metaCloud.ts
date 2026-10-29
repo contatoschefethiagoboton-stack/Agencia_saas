@@ -1,6 +1,7 @@
 import type { WhatsAppProvider, SendResult } from './types.js';
+import { graphBase } from '../../integrations/meta/graph.js';
 
-export const graphUrl = (path: string) => `https://graph.facebook.com/${process.env.META_API_VERSION}/${path}`;
+export const graphUrl = (path: string) => `${graphBase()}/${path}`;
 
 export async function graph(path: string, token: string, body?: Record<string, unknown>, method?: string) {
   const r = await fetch(graphUrl(path), {

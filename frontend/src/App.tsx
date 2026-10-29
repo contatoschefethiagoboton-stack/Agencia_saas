@@ -11,6 +11,7 @@ import Resumo from './cliente/Resumo';
 import Negocio from './cliente/Negocio';
 import ApprovalQueue from './cliente/ApprovalQueue';
 import Inbox from './cliente/Inbox';
+import Conexoes from './cliente/Conexoes';
 import './ui/forms.css';
 
 const useHash = (fallback: string) => {
@@ -26,6 +27,7 @@ const navDono: NavItem[] = [
 const navCliente: NavItem[] = [
   { href: '#cliente', label: 'Painel' }, { href: '#negocio', label: 'Meu negócio' },
   { href: '#aprovacoes', label: 'Aprovações' }, { href: '#atendimento', label: 'Atendimento WhatsApp' },
+  { href: '#conexoes', label: 'Conexões' },
 ];
 
 /** Sessão decide a área: platform_admin vê o Painel Master; owner/member veem o painel do negócio. */
@@ -58,12 +60,14 @@ function AreaMaster({ me, logout }: { me: Me; logout: () => void }) {
 }
 
 function AreaCliente({ me, logout }: { me: Me; logout: () => void }) {
-  const hash = useHash('#cliente');
+  const [hash, qs] = useHash('#cliente').split('?');            // ex.: #conexoes?meta=… (volta do login da Meta)
+  const query = new URLSearchParams(qs ?? '');
   const initials = (me.tenant_name ?? '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
     <Shell brand={me.tenant_name ?? 'Meu negócio'} sub={me.city ?? me.email} logo={initials} logoColor="var(--teal)"
            nav={navCliente} current={hash} flush={hash === '#atendimento'}>
-      {hash === '#aprovacoes' ? <ApprovalQueue /> : hash === '#atendimento' ? <Inbox /> : hash === '#negocio' ? <Negocio /> : <Resumo me={me} />}
+      {hash === '#aprovacoes' ? <ApprovalQueue /> : hash === '#atendimento' ? <Inbox /> : hash === '#negocio' ? <Negocio />
+        : hash === '#conexoes' ? <Conexoes query={query} isOwner={me.role === 'owner'} /> : <Resumo me={me} />}
       {hash !== '#atendimento' && <div className="actions"><button className="btn" onClick={logout}>Sair</button></div>}
     </Shell>
   );
