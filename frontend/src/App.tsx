@@ -45,8 +45,15 @@ export default function App() {
     const token = new URLSearchParams(location.hash.split('?')[1] ?? '').get('token') ?? '';
     return <ResetPassword token={token} onDone={() => { location.hash = ''; setMe(null); }} />;
   }
+  // LOGINS SEPARADOS: /admin é o acesso da agência; a tela principal é só dos clientes
+  const adminArea = location.pathname.replace(/\/+$/, '') === '/admin';
   if (me === undefined) return <div className="center-page"><p className="card-sub">Carregando…</p></div>;
-  if (me === null) return <Login onDone={change => { setMustChange(change); loadMe(); }} />;
+  if (me === null) return <Login area={adminArea ? 'admin' : 'cliente'} onDone={change => { setMustChange(change); loadMe(); }} />;
+  if (me.role === 'platform_admin' && !adminArea) { location.replace('/admin' + location.hash); return null; }   // admin sempre em /admin
+  if (me.role !== 'platform_admin' && !me.impersonating && adminArea) {
+    // sessão de cliente aberta na porta da agência: mostra o login da agência (sem misturar as contas)
+    return <Login area="admin" onDone={change => { setMustChange(change); loadMe(); }} />;
+  }
   if (mustChange) return <ChangePassword onDone={() => { setMustChange(false); loadMe(); }} />;
 
   const logout = async () => { await api('/auth/logout', { body: {} }).catch(() => {}); location.hash = ''; setMe(null); };

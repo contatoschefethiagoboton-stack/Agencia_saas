@@ -8,7 +8,9 @@ type Step =
   | { kind: 'code'; ticket: string; method: 'totp' | 'whatsapp' | 'totp_setup'; qr?: string; secret?: string };
 
 /** Login com 2FA obrigatório. No primeiro acesso, o usuário cadastra o app autenticador pelo QR Code. */
-export default function Login({ onDone }: { onDone: (mustChangePassword: boolean) => void }) {
+/** Login com 2FA obrigatório. area="admin" é o acesso separado da agência (/admin); "cliente" é a tela principal. */
+export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChangePassword: boolean) => void; area?: 'cliente' | 'admin' }) {
+  const isAdmin = area === 'admin';
   const [step, setStep] = useState<Step>({ kind: 'password' });
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,7 +22,7 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
     setErr(''); setBusy(true);
     try {
       if (step.kind === 'password') {
-        const r = await api('/auth/login', { body: { email, password } });
+        const r = await api('/auth/login', { body: { email, password, area } });
         setCode(''); setStep({ kind: 'code', ticket: r.ticket, method: r.method, qr: r.qr, secret: r.secret });
       } else if (step.kind === 'code') {
         const r = await api('/auth/login/verify', { body: { ticket: step.ticket, code } });
@@ -36,8 +38,8 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
     <div className="center-page">
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); if (step.kind !== 'forgot' && step.kind !== 'signup') submit(); }}>
         <div>
-          <span className="eyebrow card-sub">Agência Hub</span>
-          <h1>{step.kind === 'password' ? 'Entrar' : step.kind === 'forgot' ? 'Esqueci minha senha' : step.kind === 'signup' ? 'Criar conta' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
+          <span className="eyebrow card-sub">{isAdmin ? 'Agência Hub · Painel Master' : 'Agência Hub'}</span>
+          <h1>{step.kind === 'password' ? (isAdmin ? 'Acesso da agência' : 'Entrar') : step.kind === 'forgot' ? 'Esqueci minha senha' : step.kind === 'signup' ? 'Criar conta' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
         </div>
 
         {step.kind === 'signup' ? (
@@ -82,12 +84,16 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
             {busy ? 'Aguarde…' : step.kind === 'password' ? 'Continuar' : 'Entrar'}
           </button>
         </>}
-        {step.kind === 'password' && (
+        {step.kind === 'password' && !isAdmin && (
           <>
             <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
             <p className="card-sub" style={{ margin: 0, textAlign: 'center' }}>Ainda não tem conta?{' '}
               <button type="button" className="btn" style={{ minHeight: 36, padding: '0 12px' }} onClick={() => { setErr(''); setStep({ kind: 'signup' }); }}>Criar conta</button></p>
           </>
+        )}
+        {step.kind === 'password' && isAdmin && (
+          <p className="card-sub" style={{ margin: 0 }}>Esqueceu a senha ou perdeu o celular do 2FA? Por segurança, a recuperação do administrador
+            é feita só no Render: ADMIN_PASSWORD com a senha nova e ADMIN_RESET = 1, depois deploy.</p>
         )}
         {step.kind === 'code' && (
           <button type="button" className="btn" onClick={() => { setStep({ kind: 'password' }); setErr(''); }}>Voltar</button>

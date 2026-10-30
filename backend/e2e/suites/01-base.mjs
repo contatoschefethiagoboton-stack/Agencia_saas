@@ -14,14 +14,14 @@ function client() {
 const ok = (cond, label, extra) => { console.log(cond ? 'OK  ' : 'FAIL', label, cond ? '' : JSON.stringify(extra)); if (!cond) process.exitCode = 1; };
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'errada123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'errada123' });
 ok(r.s === 401, 'senha errada -> 401');
-r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 ok(r.j.method === 'totp_setup' && r.j.qr?.startsWith('data:image/png'), '1º login pede cadastro do 2FA com QR');
 const secret = r.j.secret;
 r = await adm('/auth/login/verify', { ticket: r.j.ticket, code: '000000' });
 ok(r.s === 401, 'código 2FA errado -> 401');
-r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 const sec2 = r.j.secret;
 r = await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(sec2) });
 ok(r.s === 200, 'login admin com TOTP', r.j);
