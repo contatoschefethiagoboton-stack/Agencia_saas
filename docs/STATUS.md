@@ -9,7 +9,8 @@ Não existe senha padrão. **Você define** em Render → Environment: `ADMIN_EM
 salva e faz o deploy. No primeiro login aparece um QR Code para o aplicativo autenticador (2FA).
 
 - **Esqueceu a senha do administrador ou perdeu o celular?** Em Environment, ponha a senha nova em `ADMIN_PASSWORD`,
-  adicione `ADMIN_RESET` = `1` e faça o deploy. Entre com a senha nova (vai pedir um QR Code novo) e **apague `ADMIN_RESET`**.
+  adicione `ADMIN_RESET` = `1` e faça o deploy. Entre com a senha nova (vai pedir um QR Code novo). A redefinição vale uma
+  vez por senha: deixar `ADMIN_RESET` não refaz nada nos próximos deploys (pode apagar quando quiser).
 - **Clientes e equipe:** botão **"Esqueci minha senha"** na tela de login (precisa do e-mail configurado: `SMTP_*`).
   Quem perdeu o celular do 2FA: o administrador usa **Clientes → Resetar acesso**.
 
