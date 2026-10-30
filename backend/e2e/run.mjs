@@ -8,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import pg from 'pg';
 import { createClient } from 'redis';
 
@@ -27,6 +28,7 @@ const env = {
   TIKTOK_VERIFY_FILENAME: 'tiktok-verificacao.txt', TIKTOK_VERIFY_CONTENT: 'tiktok-developers-site-verification=ABC123',
   IMAGE_API_KEY: 'img-key', IMAGE_API_URL: 'http://localhost:4555/v1',
   ADS_GUARD_INTERVAL_MS: '3000', PUBLISHER_INTERVAL_MS: '1500', MIGRATIONS_DIR: path.resolve(BACKEND, '../db/migrations'),
+  MAIL_OUTBOX_FILE: path.join(os.tmpdir(), 'agencia-e2e-emails.jsonl'),
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const filter = process.argv[2];
@@ -39,6 +41,7 @@ async function resetDb() {
   await c.query('CREATE DATABASE agencia_e2e OWNER agencia');
   await c.end();
   const r = createClient({ url: REDIS_URL }); await r.connect(); await r.flushAll(); await r.quit();
+  fs.rmSync(env.MAIL_OUTBOX_FILE, { force: true });
 }
 
 async function waitUp(url, ms = 20_000) {

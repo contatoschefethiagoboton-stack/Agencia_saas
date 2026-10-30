@@ -3,6 +3,7 @@ import { api } from '../api';
 
 type Step =
   | { kind: 'password' }
+  | { kind: 'forgot' }
   | { kind: 'code'; ticket: string; method: 'totp' | 'whatsapp' | 'totp_setup'; qr?: string; secret?: string };
 
 /** Login com 2FA obrigatório. No primeiro acesso, o usuário cadastra o app autenticador pelo QR Code. */
@@ -20,7 +21,7 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
       if (step.kind === 'password') {
         const r = await api('/auth/login', { body: { email, password } });
         setCode(''); setStep({ kind: 'code', ticket: r.ticket, method: r.method, qr: r.qr, secret: r.secret });
-      } else {
+      } else if (step.kind === 'code') {
         const r = await api('/auth/login/verify', { body: { ticket: step.ticket, code } });
         onDone(Boolean(r.mustChangePassword));
       }
@@ -32,13 +33,15 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
 
   return (
     <div className="center-page">
-      <form className="card auth-card" onSubmit={e => { e.preventDefault(); submit(); }}>
+      <form className="card auth-card" onSubmit={e => { e.preventDefault(); if (step.kind !== 'forgot') submit(); }}>
         <div>
           <span className="eyebrow card-sub">Agência Hub</span>
-          <h1>{step.kind === 'password' ? 'Entrar' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
+          <h1>{step.kind === 'password' ? 'Entrar' : step.kind === 'forgot' ? 'Esqueci minha senha' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
         </div>
 
-        {step.kind === 'password' ? (
+        {step.kind === 'forgot' ? (
+          <Forgot email={email} onBack={() => setStep({ kind: 'password' })} />
+        ) : step.kind === 'password' ? (
           <>
             <label className="field">E-mail
               <input type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} />
@@ -70,10 +73,15 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
           </>
         )}
 
-        {err && <p className="msg err" role="alert">{err}</p>}
-        <button className="btn btn-primary" disabled={busy || (step.kind === 'code' && code.length !== 6)}>
-          {busy ? 'Aguarde…' : step.kind === 'password' ? 'Continuar' : 'Entrar'}
-        </button>
+        {step.kind !== 'forgot' && <>
+          {err && <p className="msg err" role="alert">{err}</p>}
+          <button className="btn btn-primary" disabled={busy || (step.kind === 'code' && code.length !== 6)}>
+            {busy ? 'Aguarde…' : step.kind === 'password' ? 'Continuar' : 'Entrar'}
+          </button>
+        </>}
+        {step.kind === 'password' && (
+          <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
+        )}
         {step.kind === 'code' && (
           <button type="button" className="btn" onClick={() => { setStep({ kind: 'password' }); setErr(''); }}>Voltar</button>
         )}
@@ -109,6 +117,59 @@ export function ChangePassword({ onDone }: { onDone: () => void }) {
         </label>
         {err && <p className="msg err" role="alert">{err}</p>}
         <button className="btn btn-primary">Salvar e entrar</button>
+      </form>
+    </div>
+  );
+}
+
+/** Pede o link de redefinição. A mensagem é a mesma para qualquer e-mail (não revela quem tem cadastro). */
+function Forgot({ email: initial, onBack }: { email: string; onBack: () => void }) {
+  const [email, setEmail] = useState(initial);
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function send() {
+    setBusy(true); setMsg(null);
+    try { const r = await api('/auth/forgot', { body: { email } }); setMsg({ kind: 'ok', text: r.message }); }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(false); }
+  }
+  return (
+    <>
+      <p style={{ margin: 0 }} className="card-sub">Digite o e-mail da sua conta. Enviamos um link para você criar uma senha nova.</p>
+      <label className="field">E-mail
+        <input type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)}
+               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); send(); } }} />
+      </label>
+      {msg && <p className={`msg ${msg.kind}`} role="status">{msg.text}</p>}
+      <button type="button" className="btn btn-primary" disabled={busy || !email.includes('@')} onClick={send}>{busy ? 'Enviando…' : 'Enviar link'}</button>
+      <button type="button" className="btn" onClick={onBack}>Voltar para o login</button>
+    </>
+  );
+}
+
+/** Página aberta pelo link do e-mail (#redefinir?token=...). Funciona sem estar logado. */
+export function ResetPassword({ token, onDone }: { token: string; onDone: () => void }) {
+  const [pw, setPw] = useState('');
+  const [again, setAgain] = useState('');
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [done, setDone] = useState(false);
+  async function submit() {
+    if (pw !== again) return setMsg({ kind: 'err', text: 'As senhas não são iguais' });
+    try { await api('/auth/reset', { body: { token, password: pw } }); setDone(true); setMsg({ kind: 'ok', text: 'Senha alterada! Entre com a senha nova.' }); }
+    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+  }
+  return (
+    <div className="center-page">
+      <form className="card auth-card" onSubmit={e => { e.preventDefault(); done ? onDone() : submit(); }}>
+        <div><span className="eyebrow card-sub">Agência Hub</span><h1>Criar senha nova</h1></div>
+        {!done && <>
+          <label className="field">Senha nova (mínimo 10 caracteres)
+            <input type="password" autoComplete="new-password" required minLength={10} value={pw} onChange={e => setPw(e.target.value)} /></label>
+          <label className="field">Repita a senha nova
+            <input type="password" autoComplete="new-password" required minLength={10} value={again} onChange={e => setAgain(e.target.value)} /></label>
+        </>}
+        {msg && <p className={`msg ${msg.kind}`} role="status">{msg.text}</p>}
+        <button className="btn btn-primary">{done ? 'Ir para o login' : 'Salvar senha nova'}</button>
       </form>
     </div>
   );

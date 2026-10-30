@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Me } from './api';
 import { Shell, type NavItem } from './ui/Shell';
-import Login, { ChangePassword } from './auth/Login';
+import Login, { ChangePassword, ResetPassword } from './auth/Login';
 import { StepUpProvider } from './auth/StepUp';
 import Visao from './admin/Visao';
 import Clientes from './admin/Clientes';
@@ -40,6 +40,11 @@ export default function App() {
     .catch(() => setMe(null)), []);   // 401 (sem sessão) ou 423 (conta suspensa): volta ao login
   useEffect(() => { loadMe(); }, [loadMe]);
 
+  // link do e-mail "Esqueci minha senha": vale com ou sem sessão aberta
+  if (location.hash.startsWith('#redefinir')) {
+    const token = new URLSearchParams(location.hash.split('?')[1] ?? '').get('token') ?? '';
+    return <ResetPassword token={token} onDone={() => { location.hash = ''; setMe(null); }} />;
+  }
   if (me === undefined) return <div className="center-page"><p className="card-sub">Carregando…</p></div>;
   if (me === null) return <Login onDone={change => { setMustChange(change); loadMe(); }} />;
   if (mustChange) return <ChangePassword onDone={() => { setMustChange(false); loadMe(); }} />;

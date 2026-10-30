@@ -3,6 +3,16 @@
 Revisão completa do código contra o escopo da Agência Hub / AutoMkt Express.
 Legenda: ✅ pronto e testado · 🟡 pronto no código, depende de credencial/aprovação externa · ⛔ não existe API oficial
 
+## Acesso: e-mail e senha
+
+Não existe senha padrão. **Você define** em Render → Environment: `ADMIN_EMAIL` e `ADMIN_PASSWORD` (mínimo 10 caracteres),
+salva e faz o deploy. No primeiro login aparece um QR Code para o aplicativo autenticador (2FA).
+
+- **Esqueceu a senha do administrador ou perdeu o celular?** Em Environment, ponha a senha nova em `ADMIN_PASSWORD`,
+  adicione `ADMIN_RESET` = `1` e faça o deploy. Entre com a senha nova (vai pedir um QR Code novo) e **apague `ADMIN_RESET`**.
+- **Clientes e equipe:** botão **"Esqueci minha senha"** na tela de login (precisa do e-mail configurado: `SMTP_*`).
+  Quem perdeu o celular do 2FA: o administrador usa **Clientes → Resetar acesso**.
+
 ## Como colocar no ar (Render)
 
 1. Render → **New → Blueprint** → este repositório (`render.yaml` cria API + Postgres + Redis já ligados).
@@ -89,6 +99,8 @@ e central de segurança. Cada integração liga quando a respectiva variável é
 |---|---|
 | 2FA obrigatório: app autenticador (TOTP) ou código no WhatsApp | ✅ testado |
 | Código do autenticador vale uma única vez (anti-reuso/phishing) | ✅ testado |
+| **Esqueci minha senha** para todos: link por e-mail, uso único, 30 min, resposta que não revela quem tem conta, até 3 por hora | ✅ testado · 🟡 precisa SMTP (`SMTP_*`) |
+| Administrador esqueceu a senha ou perdeu o celular do 2FA: `ADMIN_RESET=1` no Render | ✅ testado |
 | Step-up 2FA para saque, kill switch, modo pânico, chave PIX, reset de acesso | ✅ |
 | Detecção de novo dispositivo, bloqueio após 5 senhas erradas, rate limit por IP e por e-mail | ✅ |
 | Sessão JWT em cookie httpOnly/secure/strict, revogação instantânea, renovação deslizante | ✅ |

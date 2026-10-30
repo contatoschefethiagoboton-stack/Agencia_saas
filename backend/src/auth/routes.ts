@@ -13,6 +13,9 @@ import { loginLimiter } from '../middleware/rateLimit.js';
 import { requireAuth } from '../middleware/auth.js';
 import { panicInfo } from '../security/panic.js';
 import { redis } from '../redis.js';
+import crypto from 'node:crypto';
+import { mailReady, sendMail } from '../mail.js';
+import { publicUrl } from '../config.js';
 
 export const authRouter = Router();
 const DUMMY_HASH = await argon2.hash('senha-que-nao-existe');
@@ -177,4 +180,63 @@ authRouter.post('/step-up/verify', requireAuth, async (req, res) => {
   if (!ok) return res.status(401).json({ error: 'Código inválido ou expirado' });
   setSession(res, { ...req.user!, mfaAt: Math.floor(Date.now() / 1000) });
   res.json({ ok: true });
+});
+
+// ---------- Esqueci minha senha ----------
+const sha = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
+const GENERIC = 'Se este e-mail estiver cadastrado, você vai receber um link para criar uma senha nova. Confira também o spam.';
+
+/*
+ * 1) Pede o link: a resposta é SEMPRE a mesma (não revela quem tem cadastro) e o pedido é limitado por IP+e-mail.
+ * 2) Link por e-mail, de uso único, válido por 30 min; só o hash fica no banco.
+ * 3) Senha nova derruba todas as sessões. O 2FA continua valendo: quem perdeu o celular fala com o administrador.
+ */
+authRouter.post('/forgot', loginLimiter, async (req, res) => {
+  const email = z.string().email().max(200).parse(req.body?.email).toLowerCase();
+  if (!mailReady()) return res.status(503).json({ error: 'A recuperação por e-mail ainda não foi ativada. Fale com o administrador da plataforma.' });
+  const u = (await appPool.query(`SELECT id, tenant_id, name FROM users WHERE email = $1`, [email])).rows[0];
+  if (u) {
+    // no máximo 3 links por hora por usuário (evita usar a plataforma para inundar a caixa de alguém)
+    const recent = (await appPool.query(`SELECT count(*)::int AS n FROM password_resets WHERE user_id = $1 AND created_at > now() - interval '1 hour'`, [u.id])).rows[0].n;
+    if (recent < 3) {
+      const token = crypto.randomBytes(32).toString('base64url');
+      await appPool.query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [u.id]);   // só o último link vale
+      await appPool.query(`INSERT INTO password_resets (user_id, token_hash, expires_at, ip) VALUES ($1, $2, now() + interval '30 minutes', $3::inet)`,
+                          [u.id, sha(token), req.ip ?? null]);
+      const link = `${publicUrl()}/#redefinir?token=${token}`;
+      const app = process.env.APP_NAME ?? 'Agência Hub';
+      // envio em segundo plano: a resposta leva o mesmo tempo para e-mail cadastrado ou não (sem pista por tempo)
+      void sendMail(email, `${app}: redefinir sua senha`,
+          `Olá${u.name ? `, ${u.name.split(' ')[0]}` : ''}!\n\nRecebemos um pedido para redefinir a senha da sua conta.\n` +
+          `Crie uma senha nova por este link (vale por 30 minutos e funciona uma única vez):\n\n${link}\n\n` +
+          `Se não foi você, ignore este e-mail: sua senha continua a mesma.`,
+          `<p>Olá${u.name ? `, ${u.name.split(' ')[0]}` : ''}!</p><p>Recebemos um pedido para redefinir a senha da sua conta.</p>` +
+          `<p><a href="${link}" style="display:inline-block;padding:12px 20px;background:#5B8DEF;color:#0B1220;border-radius:10px;text-decoration:none;font-weight:700">Criar senha nova</a></p>` +
+          `<p style="color:#666">O link vale por 30 minutos e funciona uma única vez. Se não foi você, ignore este e-mail: sua senha continua a mesma.</p>`)
+        .catch(e => console.error('[e-mail]', (e as Error).message));
+    }
+    await audit({ actorId: u.id, tenantId: u.tenant_id, ip: req.ip, action: 'auth.password_reset_requested', meta: { limited: recent >= 3 } });
+  }
+  res.json({ ok: true, message: GENERIC });
+});
+
+authRouter.post('/reset', loginLimiter, async (req, res) => {
+  const b = z.object({ token: z.string().min(20).max(100), password: z.string().min(10).max(200) }).safeParse(req.body);
+  if (!b.success) return res.status(400).json({ error: 'A senha precisa ter pelo menos 10 caracteres' });
+  const c = await appPool.connect();
+  try {
+    await c.query('BEGIN');
+    const r = (await c.query(`SELECT pr.id, pr.user_id, u.tenant_id FROM password_resets pr JOIN users u ON u.id = pr.user_id
+                              WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > now() FOR UPDATE OF pr`,
+                             [sha(b.data.token)])).rows[0];
+    if (!r) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'Link inválido ou vencido. Peça um novo em "Esqueci minha senha".' }); }
+    await c.query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [r.user_id]);
+    await c.query(`UPDATE users SET password_hash = $2, must_change_password = false, failed_logins = 0, locked_until = NULL,
+                     token_version = token_version + 1 WHERE id = $1`, [r.user_id, await argon2.hash(b.data.password, { type: argon2.argon2id })]);
+    await audit({ actorId: r.user_id, tenantId: r.tenant_id, ip: req.ip, action: 'auth.password_reset' }, c);
+    await c.query('COMMIT');
+    await redis.del(`authstate:${r.user_id}`);
+    res.json({ ok: true });
+  } catch (e) { await c.query('ROLLBACK'); throw e; }
+  finally { c.release(); }
 });
