@@ -5,6 +5,9 @@ Legenda: ✅ pronto e testado · 🟡 pronto no código, depende de credencial/a
 
 ## Acesso: e-mail e senha
 
+**Logins separados:** clientes entram pelo endereço principal (`https://SEU-SITE.onrender.com`); a agência entra por
+**`https://SEU-SITE.onrender.com/admin`**. Na porta errada a resposta é a mesma de senha errada (não revela que a conta existe).
+
 Não existe senha padrão. **Você define** em Render → Environment: `ADMIN_EMAIL` e `ADMIN_PASSWORD` (mínimo 10 caracteres),
 salva e faz o deploy. No primeiro login aparece um QR Code para o aplicativo autenticador (2FA).
 
@@ -12,6 +15,7 @@ salva e faz o deploy. No primeiro login aparece um QR Code para o aplicativo aut
   adicione `ADMIN_RESET` = `1` e faça o deploy. Entre com a senha nova (vai pedir um QR Code novo). A redefinição vale uma
   vez por senha: deixar `ADMIN_RESET` não refaz nada nos próximos deploys (pode apagar quando quiser).
 - **Clientes e equipe:** botão **"Esqueci minha senha"** na tela de login (precisa do e-mail configurado: `SMTP_*`).
+  O administrador **não** recupera senha por e-mail (quem invadir o e-mail não toma o Painel Master): só pelo `ADMIN_RESET`.
   Quem perdeu o celular do 2FA: o administrador usa **Clientes → Resetar acesso**.
 
 ## Agência x clientes

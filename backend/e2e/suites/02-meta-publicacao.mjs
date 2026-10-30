@@ -15,7 +15,7 @@ const ok = (c, l, x) => { console.log(c ? 'OK  ' : 'FAIL', l, c ? '' : JSON.stri
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 r = await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) });
 r = await adm('/admin/tenants', { name: 'Padaria Bom Grão', niche: 'padaria', plan: 'pro', ownerName: 'Maria', ownerEmail: 'maria@bomgrao.com' });
 const tid = r.j.id, temp = r.j.tempPassword;

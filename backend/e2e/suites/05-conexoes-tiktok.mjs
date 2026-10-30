@@ -14,7 +14,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = async () => (await fetch(F + '/v1/__log')).json();
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 const admSecret = r.j.secret, admCode = code(admSecret);
 ok((await adm('/auth/login/verify', { ticket: r.j.ticket, code: admCode })).j.ok, 'admin entra com o código do autenticador');
 const t = (await adm('/admin/tenants', { name: 'Padaria Bom Grão', niche: 'padaria', plan: 'pro', ownerName: 'Maria', ownerEmail: 'maria@bomgrao.com' })).j;
@@ -24,7 +24,7 @@ await cli('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) });
 await cli('/auth/password', { current: t.tempPassword, next: 'MinhaSenhaNova!1' });
 const tid = t.id;
 // o MESMO código do autenticador não entra duas vezes (ex.: capturado por phishing e reusado)
-{ const c2 = client(); const x = await c2('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+{ const c2 = client(); const x = await c2('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
   const again = await c2('/auth/login/verify', { ticket: x.j.ticket, code: admCode });
   ok(again.s === 401, 'código do autenticador já usado é recusado (anti-reuso)', again); }
 const db = new pg.Client({ connectionString: process.env.DATABASE_URL }); await db.connect();

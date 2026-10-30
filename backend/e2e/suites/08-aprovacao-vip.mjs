@@ -12,7 +12,7 @@ const ok = (c, l, x) => { console.log(c ? 'OK  ' : 'FAIL', l, c ? '' : JSON.stri
 const db = new pg.Client({ connectionString: process.env.DATABASE_URL }); await db.connect();
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) });
 
 // ---------- cadastro pelo site ----------
@@ -69,4 +69,27 @@ const acts = r.j.map(a => a.action);
 ok(['tenant.signup', 'tenant.approved', 'auth.login_ok', 'auth.totp_enabled', 'dossier.saved'].every(a => acts.includes(a)),
    'agência vê tudo o que aconteceu na conta do cliente (cadastro, aprovação, login, 2FA, ações)', acts);
 r = await cli(`/admin/audit?tenantId=${t.id}`); ok(r.s === 403, 'cliente não vê a auditoria');
+
+// ---------- logins separados: agência em /admin, clientes na tela principal ----------
+r = await client()('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+ok(r.s === 401 && r.j.error === 'E-mail ou senha incorretos', 'administrador NÃO entra pela tela dos clientes (resposta genérica)', r.j);
+r = await client()('/auth/login', { area: 'admin', email: 'thiago@cliente.com', password: 'SenhaDoCliente1' });
+ok(r.s === 401 && r.j.error === 'E-mail ou senha incorretos', 'cliente NÃO entra pelo acesso da agência', r.j);
+r = await client()('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
+ok(r.j.method === 'totp', 'administrador entra pelo acesso da agência', r.j);
+r = await client()('/auth/login', { area: 'cliente', email: 'thiago@cliente.com', password: 'SenhaDoCliente1' });
+ok(r.j.method === 'totp', 'cliente entra pela tela principal', r.j);
+const wrong = (await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'auth.wrong_area'`)).rows[0].n;
+ok(wrong === 2, 'tentativas na porta errada ficam na auditoria', wrong);
+const fails = (await db.query(`SELECT failed_logins FROM users WHERE email = 'dono@agencia.com'`)).rows[0].failed_logins;
+ok(fails === 0, 'porta errada com senha certa não trava a conta do admin', fails);
+// administrador não recupera senha por e-mail
+const fs = await import('node:fs');
+const before = fs.existsSync(process.env.MAIL_OUTBOX_FILE) ? fs.readFileSync(process.env.MAIL_OUTBOX_FILE, 'utf8') : '';
+r = await client()('/auth/forgot', { email: 'dono@agencia.com' });
+await new Promise(res => setTimeout(res, 500));
+const after = fs.existsSync(process.env.MAIL_OUTBOX_FILE) ? fs.readFileSync(process.env.MAIL_OUTBOX_FILE, 'utf8') : '';
+ok(r.s === 200 && /Se este e-mail/.test(r.j.message) && before === after, '"Esqueci minha senha" não envia link para o administrador (resposta igual)', r.j);
+ok((await db.query(`SELECT count(*)::int n FROM password_resets pr JOIN users u ON u.id = pr.user_id WHERE u.role = 'platform_admin'`)).rows[0].n === 0,
+   'nenhum link de redefinição criado para o administrador');
 await db.end(); process.exit();

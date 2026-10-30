@@ -11,7 +11,7 @@ function client() { let cookie = '';
 const ok = (c, l, x) => { console.log(c ? 'OK  ' : 'FAIL', l, c ? '' : JSON.stringify(x)?.slice(0, 400)); if (!c) process.exitCode = 1; };
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) });
 const t = (await adm('/admin/tenants', { name: 'Controladoria', niche: 'consultoria', plan: 'starter', ownerName: 'Thiago', ownerEmail: 'cliente@controladoria.com' })).j;
 const t2 = (await adm('/admin/tenants', { name: 'Outra Empresa', plan: 'starter', ownerName: 'Fulano', ownerEmail: 'outra@empresa.com' })).j;
@@ -36,7 +36,7 @@ const a = (await db.query(`SELECT a.action, u.email FROM audit_log a JOIN users 
 ok(a.length === 2 && a.every(x => x.email === 'dono@agencia.com'), 'auditoria registra a abertura e cada ação com o e-mail da agência', a);
 // cliente bloqueado fecha o acesso na hora
 const adm2 = client();
-r = await adm2('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+r = await adm2('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 ok(r.j.method === 'totp', 'segunda sessão do admin');
 const secret = (await (async () => { const crypto = await import('node:crypto'); const key = Buffer.from(process.env.TOKEN_ENC_KEY, 'base64');
   const b = (await db.query(`SELECT totp_secret_cipher FROM users WHERE email = 'dono@agencia.com'`)).rows[0].totp_secret_cipher;

@@ -17,7 +17,7 @@ const waitMails = async n => { for (let i = 0; i < 20 && mails().length < n; i++
 const nextWindow = () => sleep(31000 - (Date.now() % 30000));
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 const admSecret = r.j.secret;
 await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(admSecret) });
 const t = (await adm('/admin/tenants', { name: 'Padaria Bom Grão', plan: 'starter', ownerName: 'Maria Silva', ownerEmail: 'maria@bomgrao.com' })).j;
@@ -74,9 +74,9 @@ ok((await adm('/admin/dashboard')).s === 200, 'admin logado antes da redefiniç�
 out = boot({ ADMIN_RESET: '1', ADMIN_PASSWORD: 'AdminNovo!12345' });
 ok(/REDEFINIDOS/.test(out.stdout) && /não se repete/.test(out.stdout), 'ADMIN_RESET redefine (uma vez por senha)', out.stdout);
 ok((await adm('/admin/dashboard')).s === 401, 'sessão antiga do admin caiu na hora');
-r = await client()('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' }); ok(r.s === 401, 'senha antiga do admin não entra');
+r = await client()('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' }); ok(r.s === 401, 'senha antiga do admin não entra');
 const a2 = client();
-r = await a2('/auth/login', { email: 'dono@agencia.com', password: 'AdminNovo!12345' });
+r = await a2('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'AdminNovo!12345' });
 ok(r.j.method === 'totp_setup' && r.j.qr, 'senha nova entra e pede novo QR Code (2FA zerado, para quem perdeu o celular)', r.j);
 r = await a2('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) }); ok(r.j.ok, 'admin entra de novo com 2FA novo');
 ok((await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'admin.reset_by_env'`)).rows[0].n === 1, 'redefinição do admin registrada na auditoria');
@@ -84,7 +84,7 @@ ok((await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'admin.
 out = boot({ ADMIN_RESET: '1', ADMIN_PASSWORD: 'AdminNovo!12345' });
 ok(/já aplicado/.test(out.stdout), 'novo deploy com a mesma senha não redefine de novo', out.stdout);
 ok((await a2('/admin/dashboard')).s === 200, 'sessão do admin continua válida (nada foi zerado)');
-r = await client()('/auth/login', { email: 'dono@agencia.com', password: 'AdminNovo!12345' });
+r = await client()('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'AdminNovo!12345' });
 ok(r.j.method === 'totp', '2FA do admin foi mantido (não pede QR Code de novo)', r.j);
 ok((await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'admin.reset_by_env'`)).rows[0].n === 1, 'nenhuma redefinição extra na auditoria');
 // trocar a senha na variável volta a valer

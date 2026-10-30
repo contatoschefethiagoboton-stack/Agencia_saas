@@ -44,13 +44,14 @@ const readTicket = (s: string): Ticket | null => {
 };
 
 authRouter.post('/login', loginLimiter, async (req, res) => {
-  const body = z.object({ email: z.string().email(), password: z.string().min(8) }).safeParse(req.body);
+  const body = z.object({ email: z.string().email(), password: z.string().min(8),
+                          area: z.enum(['cliente', 'admin']).default('cliente') }).safeParse(req.body);
   if (!body.success) return res.status(400).json({ error: 'Dados inválidos' });
 
   const c = await appPool.connect();
   try {
     const { rows } = await c.query(
-      `SELECT id, tenant_id, email, password_hash, phone_e164, totp_enabled, locked_until > now() AS locked
+      `SELECT id, tenant_id, email, role, password_hash, phone_e164, totp_enabled, locked_until > now() AS locked
          FROM users WHERE email = $1`, [body.data.email.toLowerCase()]);
     const u = rows[0];
     // compara mesmo sem usuário, para não vazar por tempo de resposta
@@ -64,6 +65,13 @@ authRouter.post('/login', loginLimiter, async (req, res) => {
       await audit({ actorId: u?.id, tenantId: u?.tenant_id, ip: req.ip, action: 'auth.login_failed',
                     meta: { email: body.data.email.toLowerCase(), locked: Boolean(u?.locked) } }, c);
       return res.status(401).json({ error: 'E-mail ou senha incorretos' });   // mensagem genérica
+    }
+
+    // LOGINS SEPARADOS: administrador só entra por /admin; cliente só pela tela principal.
+    // Na porta errada a resposta é a mesma de senha errada (não revela que a conta existe nem que é admin).
+    if ((u.role === 'platform_admin') !== (body.data.area === 'admin')) {
+      await audit({ actorId: u.id, tenantId: u.tenant_id, ip: req.ip, action: 'auth.wrong_area', meta: { area: body.data.area } }, c);
+      return res.status(401).json({ error: 'E-mail ou senha incorretos' });
     }
 
     // cadastro feito pelo próprio cliente só entra depois que a agência aprova
@@ -215,8 +223,11 @@ const GENERIC = 'Se este e-mail estiver cadastrado, você vai receber um link pa
 authRouter.post('/forgot', loginLimiter, async (req, res) => {
   const email = z.string().email().max(200).parse(req.body?.email).toLowerCase();
   if (!mailReady()) return res.status(503).json({ error: 'A recuperação por e-mail ainda não foi ativada. Fale com o administrador da plataforma.' });
-  const u = (await appPool.query(`SELECT id, tenant_id, name FROM users WHERE email = $1`, [email])).rows[0];
-  if (u) {
+  const u = (await appPool.query(`SELECT id, tenant_id, name, role FROM users WHERE email = $1`, [email])).rows[0];
+  // administrador NÃO recupera senha por e-mail (quem invadir o e-mail não toma o Painel Master): só ADMIN_RESET no Render
+  if (u?.role === 'platform_admin') {
+    await audit({ actorId: u.id, ip: req.ip, action: 'auth.password_reset_blocked_admin' });
+  } else if (u) {
     // no máximo 3 links por hora por usuário (evita usar a plataforma para inundar a caixa de alguém)
     const recent = (await appPool.query(`SELECT count(*)::int AS n FROM password_resets WHERE user_id = $1 AND created_at > now() - interval '1 hour'`, [u.id])).rows[0].n;
     if (recent < 3) {
@@ -248,7 +259,8 @@ authRouter.post('/reset', loginLimiter, async (req, res) => {
   try {
     await c.query('BEGIN');
     const r = (await c.query(`SELECT pr.id, pr.user_id, u.tenant_id FROM password_resets pr JOIN users u ON u.id = pr.user_id
-                              WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > now() FOR UPDATE OF pr`,
+                              WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > now()
+                                AND u.role <> 'platform_admin' FOR UPDATE OF pr`,
                              [sha(b.data.token)])).rows[0];
     if (!r) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'Link inválido ou vencido. Peça um novo em "Esqueci minha senha".' }); }
     await c.query(`UPDATE password_resets SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [r.user_id]);
@@ -296,8 +308,8 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     if (mailReady()) {
       const admins = (await adminPool.query(`SELECT email FROM users WHERE role = 'platform_admin'`)).rows;
       for (const a of admins) void sendMail(a.email, `Novo cadastro aguardando aprovação: ${d.business}`,
-        `${d.name} (${email}) cadastrou "${d.business}". Aprove ou recuse em ${publicUrl()}/#master-clientes`,
-        `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}/#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
+        `${d.name} (${email}) cadastrou "${d.business}". Aprove ou recuse em ${publicUrl()}/admin#master-clientes`,
+        `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}/admin#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
         .catch(e => console.error('[e-mail]', (e as Error).message));
     }
     res.status(201).json({ ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a agência aprovar.' });

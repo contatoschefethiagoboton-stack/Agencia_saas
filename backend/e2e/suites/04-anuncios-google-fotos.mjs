@@ -13,7 +13,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = async () => (await fetch(F + '/v1/__log')).json();
 
 const adm = client();
-let r = await adm('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
+let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) });
 const mk = async (name, email) => { const t = (await adm('/admin/tenants', { name, niche: 'padaria', plan: 'starter', ownerName: 'Responsável', ownerEmail: email })).j;
   const c = client(); let x = await c('/auth/login', { email, password: t.tempPassword });
