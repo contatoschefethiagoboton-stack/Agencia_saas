@@ -72,7 +72,7 @@ out = boot({});
 ok(/já existe \(para redefinir a senha, use ADMIN_RESET=1\)/.test(out.stdout), 'sem ADMIN_RESET o deploy não muda a senha do admin', out.stdout);
 ok((await adm('/admin/dashboard')).s === 200, 'admin logado antes da redefinição');
 out = boot({ ADMIN_RESET: '1', ADMIN_PASSWORD: 'AdminNovo!12345' });
-ok(/REDEFINIDOS/.test(out.stdout) && /APAGUE a variável ADMIN_RESET/.test(out.stdout), 'ADMIN_RESET redefine e avisa para apagar a variável', out.stdout);
+ok(/REDEFINIDOS/.test(out.stdout) && /não se repete/.test(out.stdout), 'ADMIN_RESET redefine (uma vez por senha)', out.stdout);
 ok((await adm('/admin/dashboard')).s === 401, 'sessão antiga do admin caiu na hora');
 r = await client()('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' }); ok(r.s === 401, 'senha antiga do admin não entra');
 const a2 = client();
@@ -80,4 +80,14 @@ r = await a2('/auth/login', { email: 'dono@agencia.com', password: 'AdminNovo!12
 ok(r.j.method === 'totp_setup' && r.j.qr, 'senha nova entra e pede novo QR Code (2FA zerado, para quem perdeu o celular)', r.j);
 r = await a2('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) }); ok(r.j.ok, 'admin entra de novo com 2FA novo');
 ok((await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'admin.reset_by_env'`)).rows[0].n === 1, 'redefinição do admin registrada na auditoria');
+// deixar ADMIN_RESET=1 no Render é inofensivo: o próximo deploy não redefine de novo
+out = boot({ ADMIN_RESET: '1', ADMIN_PASSWORD: 'AdminNovo!12345' });
+ok(/já aplicado/.test(out.stdout), 'novo deploy com a mesma senha não redefine de novo', out.stdout);
+ok((await a2('/admin/dashboard')).s === 200, 'sessão do admin continua válida (nada foi zerado)');
+r = await client()('/auth/login', { email: 'dono@agencia.com', password: 'AdminNovo!12345' });
+ok(r.j.method === 'totp', '2FA do admin foi mantido (não pede QR Code de novo)', r.j);
+ok((await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'admin.reset_by_env'`)).rows[0].n === 1, 'nenhuma redefinição extra na auditoria');
+// trocar a senha na variável volta a valer
+out = boot({ ADMIN_RESET: '1', ADMIN_PASSWORD: 'OutraSenhaAdmin!9' });
+ok(/REDEFINIDOS/.test(out.stdout), 'trocar ADMIN_PASSWORD aplica uma nova redefinição', out.stdout);
 await db.end(); process.exit();

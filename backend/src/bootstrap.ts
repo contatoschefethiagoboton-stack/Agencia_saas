@@ -4,7 +4,8 @@
  *   - Manual: node dist/bootstrap.js email@dominio.com 'SenhaForte123'
  *   - ESQUECEU A SENHA OU PERDEU O CELULAR DO 2FA: defina também ADMIN_RESET=1 e faça o deploy.
  *     A senha do ADMIN_EMAIL passa a ser ADMIN_PASSWORD, o 2FA é zerado (novo QR Code no próximo login)
- *     e todas as sessões caem. Depois APAGUE ADMIN_RESET, senão a senha é redefinida a cada deploy.
+ *     e todas as sessões caem. A redefinição vale UMA vez por senha: deixar ADMIN_RESET=1 não refaz nada
+ *     nos próximos deploys; só age de novo se ADMIN_PASSWORD (ou ADMIN_EMAIL) mudar.
  * O 2FA (aplicativo autenticador) é configurado no primeiro login.
  */
 import argon2 from 'argon2';
@@ -40,7 +41,12 @@ const c = new pg.Client({ connectionString: url });
 await c.connect();
 try {
   const exists = (await c.query(`SELECT 1 FROM users WHERE role = 'platform_admin' LIMIT 1`)).rowCount;
-  if (reset) {
+  // impressão digital da última redefinição (argon2 de email+senha): o mesmo ADMIN_RESET não é reaplicado
+  const last = reset ? (await c.query(`SELECT value FROM system_settings WHERE key = 'admin_reset'`).catch(() => ({ rows: [] as any[] }))).rows[0]?.value : null;
+  const alreadyApplied = Boolean(last) && await argon2.verify(last, `${email}:${password}`).catch(() => false);
+  if (reset && alreadyApplied) {
+    console.log(`[bootstrap] ADMIN_RESET já aplicado para ${email} com esta senha: nada a fazer. (Pode apagar a variável; para redefinir de novo, troque ADMIN_PASSWORD.)`);
+  } else if (reset) {
     const other = (await c.query(`SELECT role FROM users WHERE email = $1`, [email])).rows[0];
     if (other && other.role !== 'platform_admin') {
       console.error(`[bootstrap] ${email} é usuário de cliente, não administrador: nada foi alterado`);
@@ -61,8 +67,11 @@ try {
           await r.del(`authstate:${id}`);
         } catch { /* sem Redis acessível: a sessão antiga cai em até 30s */ } finally { await r.quit().catch(() => {}); }
       }
+      await c.query(`INSERT INTO system_settings (key, value) VALUES ('admin_reset', $1)
+                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+                    [await argon2.hash(`${email}:${password}`, { type: argon2.argon2id })]);
       console.log(`[bootstrap] SENHA E 2FA DO ADMINISTRADOR ${email} REDEFINIDOS. Entre com a senha nova e leia o QR Code.`);
-      console.log('[bootstrap] >>> APAGUE a variável ADMIN_RESET no Render agora, senão a senha é redefinida a cada deploy. <<<');
+      console.log('[bootstrap] Esta redefinição não se repete nos próximos deploys. Pode apagar ADMIN_RESET quando quiser.');
     }
   } else if (exists && !argEmail) {
     console.log('[bootstrap] administrador já existe (para redefinir a senha, use ADMIN_RESET=1)');
