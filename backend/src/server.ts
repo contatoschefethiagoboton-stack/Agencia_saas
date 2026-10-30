@@ -16,6 +16,7 @@ import { metaCallbackRouter } from './integrations/meta/oauth.js';
 import { googleCallbackRouter } from './integrations/google/google.js';
 import { tiktokCallbackRouter, tiktokVerifyRouter } from './integrations/tiktok/tiktok.js';
 import { servicePool } from './db.js';
+import { encryptionKeyStatus } from './security/vault.js';
 
 const app = express();
 app.set('trust proxy', 1);                   // atrás do proxy do Render/Cloudflare
@@ -68,7 +69,14 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(500).json({ error: 'Erro interno' });       // nunca vaza stack para o cliente
 });
 
-app.listen(Number(process.env.PORT ?? 3000), () => console.log('API no ar'));
+app.listen(Number(process.env.PORT ?? 3000), () => {
+  console.log('API no ar');
+  // conferência de configuração: avisa no log do Render o que falta, em vez de falhar no meio de um login
+  const enc = encryptionKeyStatus();
+  if (!process.env.JWT_SECRET) console.warn('[config] JWT_SECRET não definida: ninguém consegue entrar. Defina em Environment.');
+  if (!enc.ok) console.warn(`[config] ${enc.detail}: o 2FA e as conexões com redes não funcionam.`);
+  else if (enc.source === 'jwt_secret') console.warn('[config] TOKEN_ENC_KEY não definida: usando chave derivada do JWT_SECRET. Funciona, mas não troque o JWT_SECRET depois.');
+});
 
 // Sem Background Worker (ex.: plano free do Render), a fila do WhatsApp e a IA rodam neste mesmo processo.
 // Com um worker separado (node dist/workers.js), defina RUN_WORKERS_IN_WEB=0 no serviço web.
