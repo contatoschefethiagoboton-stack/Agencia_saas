@@ -16,7 +16,7 @@ import { redis } from '../redis.js';
 import crypto from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { mailReady, sendMail } from '../mail.js';
-import { publicUrl } from '../config.js';
+import { publicUrl, adminPath } from '../config.js';
 
 export const authRouter = Router();
 const DUMMY_HASH = await argon2.hash('senha-que-nao-existe');
@@ -154,7 +154,8 @@ authRouter.get('/me', requireAuth, async (req, res) => {
        FROM users u LEFT JOIN tenants t ON t.id = coalesce($2::uuid, u.tenant_id) WHERE u.id = $1`,
     [s.sub, s.imp ? s.tid : null]);
   res.json({ ...rows[0], ...(s.imp ? { role: 'owner', impersonating: true } : {}),
-             panic: s.role === 'platform_admin' ? await panicInfo() : undefined });
+             panic: s.role === 'platform_admin' ? await panicInfo() : undefined,
+             adminPath: s.role === 'platform_admin' ? adminPath() : undefined });
 });
 
 /** Sai do painel do cliente e volta ao Painel Master. */
@@ -308,8 +309,8 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     if (mailReady()) {
       const admins = (await adminPool.query(`SELECT email FROM users WHERE role = 'platform_admin'`)).rows;
       for (const a of admins) void sendMail(a.email, `Novo cadastro aguardando aprovação: ${d.business}`,
-        `${d.name} (${email}) cadastrou "${d.business}". Aprove ou recuse em ${publicUrl()}/admin#master-clientes`,
-        `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}/admin#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
+        `${d.name} (${email}) cadastrou "${d.business}". Aprove ou recuse em ${publicUrl()}${adminPath()}#master-clientes`,
+        `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}${adminPath()}#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
         .catch(e => console.error('[e-mail]', (e as Error).message));
     }
     res.status(201).json({ ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a agência aprovar.' });

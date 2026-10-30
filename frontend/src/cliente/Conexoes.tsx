@@ -1,6 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, dataHora } from '../api';
 import { useLoad } from '../ui/useLoad';
+import { BrandMark, Icon } from '../ui/Icon';
+import { openLoginWindow, goToLogin, cancelLogin } from '../ui/oauthPopup';
+
+type Net = 'meta' | 'google' | 'tiktok';
+const REDE: Record<Net, string> = { meta: 'Meta (Facebook e Instagram)', google: 'Google', tiktok: 'TikTok' };
 
 interface Conn { provider: string; external_id: string; name: string | null; expires_at: string | null; connected_at: string;
                  needs_reconnect: boolean; last_error: string | null; expiring: boolean }
@@ -41,17 +46,20 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
       .catch(e => setMsg({ kind: 'err', text: e.message }));
   }, [gNonce]);
 
-  async function startTiktok() {
-    setBusy(true); setMsg(null);
-    try { location.href = (await api<{ url: string }>('/client/connect/tiktok/start', { body: {} })).url; }
-    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); setBusy(false); }
+  // abre o login oficial da rede numa janela separada; a escolha da página/perfil aparece aqui quando ela fechar
+  const win = useRef<Window | null>(null);
+  const [waiting, setWaiting] = useState<Net | null>(null);
+  async function connect(net: Net) {
+    setMsg(null); setBusy(true);
+    const w = openLoginWindow();                       // precisa ser no clique, antes de esperar a API
+    try {
+      const { url } = await api<{ url: string }>(`/client/connect/${net}/start`, { body: {} });
+      win.current = w; goToLogin(w, url);
+      if (w) setWaiting(net);
+    } catch (e) { cancelLogin(w); setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(false); }
   }
-
-  async function startGoogle() {
-    setBusy(true); setMsg(null);
-    try { location.href = (await api<{ url: string }>('/client/connect/google/start', { body: {} })).url; }
-    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); setBusy(false); }
-  }
+  function stopWaiting() { cancelLogin(win.current); win.current = null; setWaiting(null); }
 
   async function confirmGoogle() {
     setBusy(true);
@@ -61,12 +69,6 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
       setGPending(null); location.hash = '#conexoes'; conns.reload();
     } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
     finally { setBusy(false); }
-  }
-
-  async function start() {
-    setBusy(true); setMsg(null);
-    try { location.href = (await api<{ url: string }>('/client/connect/meta/start', { body: {} })).url; }
-    catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); setBusy(false); }
   }
 
   async function confirmSelection() {
@@ -85,9 +87,20 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
     catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
   }
 
+  const of = (ps: string[]) => conns.data?.filter(c => ps.includes(c.provider)) ?? [];
+  const metaConns = of(['facebook', 'instagram', 'meta_ads']), gConns = of(['google_business']), tConns = of(['tiktok']);
+  const item = (c: Conn) => (
+    <div className="net-item" key={c.provider}>
+      <span><b>{NOMES[c.provider] ?? c.provider}</b><br /><span className="card-sub">{c.name ?? c.external_id} · desde {dataHora(c.connected_at)}
+        {c.expires_at ? ` · renovar até ${dataHora(c.expires_at)}` : ''}</span></span>
+      {saude(c)}
+      {isOwner && <button className="btn" style={{ minHeight: 36 }} onClick={() => disconnect(c.provider)}>Desconectar</button>}
+    </div>);
+
   return (
     <>
-      <header className="page-head"><div><span className="eyebrow">Redes sociais e anúncios</span><h1>Conexões</h1></div></header>
+      <header className="page-head"><div><span className="eyebrow">Redes sociais e anúncios</span><h1>Conexões</h1>
+        <p className="card-sub" style={{ margin: '6px 0 0' }}>Clique em conectar: o login oficial da rede abre numa janela separada e esta tela continua aberta.</p></div></header>
       {msg && <p className={`msg ${msg.kind}`} role="status">{msg.text}</p>}
 
       {pending && (
@@ -126,57 +139,61 @@ export default function Conexoes({ query, isOwner }: { query: URLSearchParams; i
         </section>
       )}
 
-      <section className="card">
-        <div className="card-head" style={{ alignItems: 'center' }}>
-          <div><h2>Google Meu Negócio</h2>
-            <span className="card-sub">Publica as novidades do calendário no seu perfil do Google (aparece na busca e no Maps).</span></div>
-          {isOwner && features.data?.google && <button className="btn btn-primary" disabled={busy} onClick={startGoogle}>
-            {conns.data?.some(c => c.provider === 'google_business') ? 'Reconectar' : 'Conectar com Google'}</button>}
-        </div>
-        {features.data && !features.data.google && <p className="card-sub">A agência ainda está ativando esta integração.</p>}
-        {conns.data?.filter(c => c.provider === 'google_business').map(c => (
-          <div key={c.provider} className="actions" style={{ justifyContent: 'space-between' }}>
-            <span><b>{c.name}</b> {saude(c)} <span className="card-sub">· desde {dataHora(c.connected_at)}</span></span>
-            {isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}
-          </div>))}
-      </section>
+      {waiting && (
+        <section className="card" style={{ borderColor: 'var(--accent)' }} role="status">
+          <div className="wait"><span className="spinner" />
+            <div><b>Termine o login do {REDE[waiting]} na janela que abriu.</b>
+              <div className="card-sub">Quando terminar, ela fecha sozinha e você escolhe aqui o que conectar.</div></div></div>
+          <div className="actions">
+            <button className="btn" onClick={() => connect(waiting)}><Icon name="external" size={18} />Abrir a janela de novo</button>
+            <button className="btn" onClick={stopWaiting}>Cancelar</button>
+          </div>
+        </section>)}
 
-      <section className="card">
-        <div className="card-head" style={{ alignItems: 'center' }}>
-          <div><h2>Facebook, Instagram e Meta Ads</h2>
-            <span className="card-sub">Login oficial da Meta. A plataforma nunca vê sua senha; você pode remover o acesso quando quiser.</span></div>
-          {isOwner && <button className="btn btn-primary" disabled={busy} onClick={start}>{conns.data?.some(c => ['facebook', 'instagram', 'meta_ads'].includes(c.provider)) ? 'Reconectar' : 'Conectar com Facebook'}</button>}
-        </div>
-        {conns.data?.some(c => ['facebook', 'instagram', 'meta_ads'].includes(c.provider)) ? (
-          <div className="table-wrap"><table className="tbl">
-            <tbody>{conns.data.filter(c => ['facebook', 'instagram', 'meta_ads'].includes(c.provider)).map(c => (
-              <tr key={c.provider}><td><b>{NOMES[c.provider] ?? c.provider}</b></td><td>{c.name ?? c.external_id} {saude(c)}</td>
-                <td className="card-sub">desde {dataHora(c.connected_at)}{c.expires_at ? ` · renovar até ${dataHora(c.expires_at)}` : ''}</td>
-                <td>{isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}</td></tr>))}
-            </tbody></table></div>
-        ) : <p className="card-sub">Nada conectado ainda.</p>}
-        {!isOwner && <p className="card-sub">Só o responsável pela conta pode conectar ou desconectar.</p>}
-      </section>
-
-      <section className="card">
-        <div className="card-head" style={{ alignItems: 'center' }}>
-          <div><h2>TikTok</h2>
-            <span className="card-sub">Publica os carrosséis do calendário como posts de fotos com música. Vídeos continuam com você: os roteiros ficam em Aprovações.</span></div>
-          {isOwner && features.data?.tiktok && <button className="btn btn-primary" disabled={busy} onClick={startTiktok}>
-            {conns.data?.some(c => c.provider === 'tiktok') ? 'Reconectar' : 'Conectar com TikTok'}</button>}
-        </div>
-        {features.data && !features.data.tiktok && <p className="card-sub">A agência ainda está ativando esta integração.</p>}
-        {conns.data?.filter(c => c.provider === 'tiktok').map(c => (
-          <div key={c.provider} className="actions" style={{ justifyContent: 'space-between' }}>
-            <span><b>{c.name}</b> {saude(c)} <span className="card-sub">· desde {dataHora(c.connected_at)}</span></span>
-            {isOwner && <button className="btn" onClick={() => disconnect(c.provider)}>Desconectar</button>}
-          </div>))}
-      </section>
+      <div className="net-grid">
+        <NetCard net="meta" title="Facebook, Instagram e Meta Ads" status={metaConns.length ? status(metaConns) : undefined}
+                 text="Publica posts e carrosséis no Facebook e no Instagram, e liga os anúncios da Meta. Login oficial: a plataforma nunca vê sua senha."
+                 action={isOwner && <button className="btn btn-primary" disabled={busy} onClick={() => connect('meta')}>
+                   <Icon name="external" size={18} />{metaConns.length ? 'Reconectar' : 'Conectar com Facebook'}</button>}>
+          {metaConns.length > 0 && metaConns.map(item)}
+        </NetCard>
+        <NetCard net="google" title="Google Meu Negócio" status={gConns.length ? status(gConns) : undefined}
+                 text="Publica as novidades do calendário no seu perfil do Google (aparece na busca e no Maps)."
+                 off={features.data && !features.data.google}
+                 action={isOwner && features.data?.google && <button className="btn btn-primary" disabled={busy} onClick={() => connect('google')}>
+                   <Icon name="external" size={18} />{gConns.length ? 'Reconectar' : 'Conectar com Google'}</button>}>
+          {gConns.length > 0 && gConns.map(item)}
+        </NetCard>
+        <NetCard net="tiktok" title="TikTok" status={tConns.length ? status(tConns) : undefined}
+                 text="Publica os carrosséis do calendário como posts de fotos com música. Os roteiros de vídeo ficam em Aprovações."
+                 off={features.data && !features.data.tiktok}
+                 action={isOwner && features.data?.tiktok && <button className="btn btn-primary" disabled={busy} onClick={() => connect('tiktok')}>
+                   <Icon name="external" size={18} />{tConns.length ? 'Reconectar' : 'Conectar com TikTok'}</button>}>
+          {tConns.length > 0 && tConns.map(item)}
+        </NetCard>
+      </div>
+      {!isOwner && <p className="card-sub">Só o responsável pela conta pode conectar ou desconectar.</p>}
 
       <section className="banner">
         <b>Antes de conectar:</b> o Instagram precisa ser <b>profissional</b> (empresa ou criador) e estar <b>vinculado a uma Página do Facebook</b>.
         No app do Instagram: Configurações → Tipo de conta → Mudar para conta profissional → Conectar Página.
       </section>
     </>
+  );
+}
+
+const status = (cs: Conn[]) => cs.some(c => c.needs_reconnect) ? 'bad' : cs.some(c => c.expiring) ? 'warn' : 'good';
+
+function NetCard({ net, title, text, status, off, action, children }:
+  { net: Net; title: string; text: string; status?: 'good' | 'warn' | 'bad'; off?: boolean | null; action?: ReactNode; children?: ReactNode }) {
+  return (
+    <section className="card net-card">
+      <div className="net-head"><BrandMark net={net} size={44} /><h2>{title}</h2>
+        {status ? <span className={`badge ${status}`}>{status === 'good' ? 'Conectado' : status === 'warn' ? 'Vence em breve' : 'Reconectar'}</span>
+          : <span className="badge">Não conectado</span>}</div>
+      <p className="card-sub" style={{ margin: 0 }}>{text}</p>
+      {children && <div className="net-items">{children}</div>}
+      {off ? <p className="card-sub" style={{ margin: 0 }}>A agência ainda está ativando esta integração.</p> : action ? <div className="actions">{action}</div> : null}
+    </section>
   );
 }

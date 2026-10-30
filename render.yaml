@@ -41,6 +41,8 @@ services:
         sync: false
       - key: ADMIN_PASSWORD       # mínimo 10 caracteres; troque depois do 1º login
         sync: false
+      - key: ADMIN_PATH           # endereço secreto do login da agência, ex.: /acesso-minha-agencia-7k2 (sem ele: /admin)
+        sync: false
       # E-mail para "Esqueci minha senha" (qualquer SMTP: Gmail com senha de app, Zoho, Resend, SendGrid...)
       - key: SMTP_HOST
         sync: false

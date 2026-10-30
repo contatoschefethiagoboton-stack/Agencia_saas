@@ -1,5 +1,35 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { api } from '../api';
+import { Icon } from '../ui/Icon';
+
+/** Tela de entrada moderna: painel da marca à esquerda e o formulário à direita (no celular, só o formulário). */
+export function AuthLayout({ admin, children }: { admin?: boolean; children: ReactNode }) {
+  return (
+    <div className="auth">
+      <aside className={`auth-brand${admin ? ' admin' : ''}`}>
+        <div className="auth-logo"><i>A</i>Agência Hub</div>
+        {admin ? <>
+          <h2>Painel Master da agência</h2>
+          <ul>
+            <li><Icon name="users" />Todos os clientes, aprovações e contas VIP</li>
+            <li><Icon name="wallet" />Tesouraria, cobranças e repasses</li>
+            <li><Icon name="shield" />Auditoria, modo pânico e 2FA obrigatório</li>
+          </ul>
+        </> : <>
+          <h2>Seu marketing no piloto automático</h2>
+          <ul>
+            <li><Icon name="spark" />Posts e artes criados com IA para o seu negócio</li>
+            <li><Icon name="check" />Você aprova com um toque, a gente publica</li>
+            <li><Icon name="link" />Instagram, Facebook, Google e TikTok num só lugar</li>
+          </ul>
+        </>}
+        <small className="card-sub">Acesso protegido com verificação em duas etapas.</small>
+      </aside>
+      <div className="auth-form">{children}</div>
+    </div>
+  );
+}
+
 
 type Step =
   | { kind: 'password' }
@@ -7,7 +37,6 @@ type Step =
   | { kind: 'signup' }
   | { kind: 'code'; ticket: string; method: 'totp' | 'whatsapp' | 'totp_setup'; qr?: string; secret?: string };
 
-/** Login com 2FA obrigatório. No primeiro acesso, o usuário cadastra o app autenticador pelo QR Code. */
 /** Login com 2FA obrigatório. area="admin" é o acesso separado da agência (/admin); "cliente" é a tela principal. */
 export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChangePassword: boolean) => void; area?: 'cliente' | 'admin' }) {
   const isAdmin = area === 'admin';
@@ -35,10 +64,11 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
   }
 
   return (
-    <div className="center-page">
+    <AuthLayout admin={isAdmin}>
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); if (step.kind !== 'forgot' && step.kind !== 'signup') submit(); }}>
+        <div className="auth-logo auth-mobile-logo"><i>A</i>Agência Hub</div>
         <div>
-          <span className="eyebrow card-sub">{isAdmin ? 'Agência Hub · Painel Master' : 'Agência Hub'}</span>
+          <span className="eyebrow card-sub">{isAdmin ? 'Painel Master · acesso restrito' : step.kind === 'password' ? 'Bem-vindo de volta' : 'Agência Hub'}</span>
           <h1>{step.kind === 'password' ? (isAdmin ? 'Acesso da agência' : 'Entrar') : step.kind === 'forgot' ? 'Esqueci minha senha' : step.kind === 'signup' ? 'Criar conta' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
         </div>
 
@@ -86,9 +116,9 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
         </>}
         {step.kind === 'password' && !isAdmin && (
           <>
-            <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
-            <p className="card-sub" style={{ margin: 0, textAlign: 'center' }}>Ainda não tem conta?{' '}
-              <button type="button" className="btn" style={{ minHeight: 36, padding: '0 12px' }} onClick={() => { setErr(''); setStep({ kind: 'signup' }); }}>Criar conta</button></p>
+            <button type="button" className="link-btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
+            <div className="auth-divider">Ainda não tem conta?</div>
+            <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'signup' }); }}>Criar conta grátis</button>
           </>
         )}
         {step.kind === 'password' && isAdmin && (
@@ -99,7 +129,7 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
           <button type="button" className="btn" onClick={() => { setStep({ kind: 'password' }); setErr(''); }}>Voltar</button>
         )}
       </form>
-    </div>
+    </AuthLayout>
   );
 }
 
@@ -115,8 +145,9 @@ export function ChangePassword({ onDone }: { onDone: () => void }) {
     catch (e) { setErr((e as Error).message); }
   }
   return (
-    <div className="center-page">
+    <AuthLayout>
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); submit(); }}>
+        <div className="auth-logo auth-mobile-logo"><i>A</i>Agência Hub</div>
         <h1>Crie sua senha</h1>
         <p style={{ margin: 0 }} className="card-sub">Você entrou com uma senha provisória. Escolha uma nova com pelo menos 10 caracteres.</p>
         <label className="field">Senha provisória
@@ -131,7 +162,7 @@ export function ChangePassword({ onDone }: { onDone: () => void }) {
         {err && <p className="msg err" role="alert">{err}</p>}
         <button className="btn btn-primary">Salvar e entrar</button>
       </form>
-    </div>
+    </AuthLayout>
   );
 }
 
@@ -172,8 +203,9 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
     catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
   }
   return (
-    <div className="center-page">
+    <AuthLayout>
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); done ? onDone() : submit(); }}>
+        <div className="auth-logo auth-mobile-logo"><i>A</i>Agência Hub</div>
         <div><span className="eyebrow card-sub">Agência Hub</span><h1>Criar senha nova</h1></div>
         {!done && <>
           <label className="field">Senha nova (mínimo 10 caracteres)
@@ -184,7 +216,7 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
         {msg && <p className={`msg ${msg.kind}`} role="status">{msg.text}</p>}
         <button className="btn btn-primary">{done ? 'Ir para o login' : 'Salvar senha nova'}</button>
       </form>
-    </div>
+    </AuthLayout>
   );
 }
 

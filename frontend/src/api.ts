@@ -27,4 +27,5 @@ export interface Me {
   tenant_id: string | null; tenant_name: string | null; city: string | null; niche: string | null; plan: string | null;
   panic?: { on: boolean; reason?: string; at?: string };
   impersonating?: boolean;   // administrador da agência operando o painel deste cliente
+  adminPath?: string;        // endereço secreto do login da agência (só vem para o administrador)
 }

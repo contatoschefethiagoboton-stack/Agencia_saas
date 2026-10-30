@@ -29,7 +29,11 @@ const env = {
   IMAGE_API_KEY: 'img-key', IMAGE_API_URL: 'http://localhost:4555/v1',
   ADS_GUARD_INTERVAL_MS: '3000', PUBLISHER_INTERVAL_MS: '1500', MIGRATIONS_DIR: path.resolve(BACKEND, '../db/migrations'),
   MAIL_OUTBOX_FILE: path.join(os.tmpdir(), 'agencia-e2e-emails.jsonl'),
+  ADMIN_PATH: '/acesso-secreto-e2e', WEB_DIR: path.join(os.tmpdir(), 'agencia-e2e-web'),
 };
+// painel "construído" mínimo, para testar qual endereço recebe a tela da agência
+fs.mkdirSync(env.WEB_DIR, { recursive: true });
+fs.writeFileSync(path.join(env.WEB_DIR, 'index.html'), '<!doctype html><html><head><title>t</title></head><body><div id="root"></div></body></html>');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const filter = process.argv[2];
 const suites = fs.readdirSync(path.join(DIR, 'suites')).filter(f => f.endsWith('.mjs') && (!filter || f.includes(filter))).sort();
