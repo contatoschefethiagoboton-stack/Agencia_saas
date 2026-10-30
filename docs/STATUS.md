@@ -5,8 +5,15 @@ Legenda: ✅ pronto e testado · 🟡 pronto no código, depende de credencial/a
 
 ## Acesso: e-mail e senha
 
-**Logins separados:** clientes entram pelo endereço principal (`https://SEU-SITE.onrender.com`); a agência entra por
-**`https://SEU-SITE.onrender.com/admin`**. Na porta errada a resposta é a mesma de senha errada (não revela que a conta existe).
+**Logins separados:** clientes entram pelo endereço principal (`https://SEU-SITE.onrender.com`) e só veem o login de cliente.
+A agência entra por um **endereço secreto** que você escolhe em Render → Environment → `ADMIN_PATH`
+(ex.: `/acesso-minha-agencia-7k2` → `https://SEU-SITE.onrender.com/acesso-minha-agencia-7k2`). Sem `ADMIN_PATH`, vale `/admin`.
+O endereço aparece no log do Render ao subir (`[config] Login da agência: …`). Em qualquer outro endereço a tela da agência não existe;
+e mesmo quem acertar o endereço com uma conta de cliente recebe a mesma resposta de senha errada. A página secreta não é indexada pelo Google.
+Do Painel Master você continua abrindo o painel de qualquer cliente (Clientes → Abrir painel do cliente).
+
+**Conectar redes (Meta, Google, TikTok):** em Conexões, o login oficial da rede abre numa **janela separada**; ao terminar ela se fecha
+e a escolha da página/perfil aparece na tela principal. Se o navegador bloquear janelas, o login segue na mesma aba.
 
 Não existe senha padrão. **Você define** em Render → Environment: `ADMIN_EMAIL` e `ADMIN_PASSWORD` (mínimo 10 caracteres),
 salva e faz o deploy. No primeiro login aparece um QR Code para o aplicativo autenticador (2FA).

@@ -17,11 +17,13 @@ import { googleCallbackRouter } from './integrations/google/google.js';
 import { tiktokCallbackRouter, tiktokVerifyRouter } from './integrations/tiktok/tiktok.js';
 import { servicePool } from './db.js';
 import { encryptionKeyStatus } from './security/vault.js';
+import { adminPath, publicUrl } from './config.js';
 
 const app = express();
 app.set('trust proxy', 1);                   // atrás do proxy do Render/Cloudflare
 app.disable('x-powered-by');
-app.use(helmet({ contentSecurityPolicy: { directives: { 'img-src': ["'self'", 'data:', 'https:'] } } }));
+app.use(helmet({ contentSecurityPolicy: { directives: { 'img-src': ["'self'", 'data:', 'https:'] } },
+                 crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' } }));   // janela de login das redes sociais
 app.use(cookieParser());
 const rawBody = (req: any, _res: unknown, buf: Buffer) => { req.rawBody = buf; };
 const jsonSmall = express.json({ limit: '1mb', verify: rawBody });
@@ -59,7 +61,14 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontra
 const webDir = path.resolve(process.env.WEB_DIR ?? 'public');
 if (fs.existsSync(path.join(webDir, 'index.html'))) {
   app.use(express.static(webDir, { index: false }));
-  app.get(/^\/(?!api\/|webhooks\/).*/, (_req, res) => res.sendFile(path.join(webDir, 'index.html')));
+  // LOGINS SEPARADOS: só o endereço secreto (ADMIN_PATH) recebe a marca da área da agência.
+  // Em qualquer outro endereço o site só conhece o login de cliente.
+  const html = fs.readFileSync(path.join(webDir, 'index.html'), 'utf8');
+  const adminHtml = html.replace('</head>', `<meta name="app-area" content="admin"><meta name="robots" content="noindex, nofollow"></head>`);
+  app.get(/^\/(?!api\/|webhooks\/).*/, (req, res) => {
+    const isAdmin = req.path.replace(/\/+$/, '') === adminPath();
+    res.set('Cache-Control', 'no-store').type('html').send(isAdmin ? adminHtml : html);
+  });
 }
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -71,6 +80,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 app.listen(Number(process.env.PORT ?? 3000), () => {
   console.log('API no ar');
+  console.log(`[config] Login da agência: ${publicUrl()}${adminPath()}`);
+  if (adminPath() === '/admin') console.warn('[config] ADMIN_PATH não definida: o login da agência está no endereço padrão /admin. Defina um endereço secreto (ex.: /acesso-minha-agencia-7k2).');
   // conferência de configuração: avisa no log do Render o que falta, em vez de falhar no meio de um login
   const enc = encryptionKeyStatus();
   if (!process.env.JWT_SECRET) console.warn('[config] JWT_SECRET não definida: ninguém consegue entrar. Defina em Environment.');
