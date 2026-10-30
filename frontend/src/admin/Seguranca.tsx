@@ -14,10 +14,13 @@ const nomes: Record<string, string> = {
 const gravidade = (a: string) => /chargeback|mismatch|killed|panic_on|rejected/.test(a) ? 'bad'
   : /failed|new_device/.test(a) ? 'warn' : '';
 
-export default function Seguranca() {
+export default function Seguranca({ tenantId }: { tenantId?: string }) {
   const sum = useLoad<Summary>('/admin/security/summary');
-  const [onlySec, setOnlySec] = useState(true);
-  const logs = useLoad<Log[]>(`/admin/audit${onlySec ? '?security=1' : ''}`);
+  const tenants = useLoad<{ id: string; name: string }[]>('/admin/tenants');
+  const [tenant, setTenant] = useState(tenantId ?? '');
+  const [onlySec, setOnlySec] = useState(!tenantId);
+  const qs = new URLSearchParams({ ...(onlySec ? { security: '1' } : {}), ...(tenant ? { tenantId: tenant } : {}) }).toString();
+  const logs = useLoad<Log[]>(`/admin/audit${qs ? `?${qs}` : ''}`);
   const guard = useStepUp();
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const panic = sum.data?.panic;
@@ -69,9 +72,17 @@ export default function Seguranca() {
       )}
 
       <section className="card">
-        <div className="card-head"><h2>Logs de auditoria</h2>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
-            <input type="checkbox" checked={onlySec} onChange={e => setOnlySec(e.target.checked)} /> Só eventos de segurança</label></div>
+        <div className="card-head"><div><h2>{tenant ? 'Tudo o que acontece na conta do cliente' : 'Logs de auditoria'}</h2>
+            <span className="card-sub">Logins, dispositivos novos, aprovações, publicações, anúncios, conexões e alterações.</span></div>
+          <div className="actions">
+            <select aria-label="Filtrar por cliente" value={tenant} onChange={e => setTenant(e.target.value)}
+                    style={{ background: 'var(--card-2)', border: '1px solid var(--border-strong)', borderRadius: 10, minHeight: 44, padding: '0 10px' }}>
+              <option value="">Todos os clientes</option>
+              {tenants.data?.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+              <input type="checkbox" checked={onlySec} onChange={e => setOnlySec(e.target.checked)} /> Só eventos de segurança</label>
+          </div></div>
         {logs.error && <p className="msg err">{logs.error}</p>}
         <div className="table-wrap"><table className="tbl">
           <thead><tr><th>Quando</th><th>Evento</th><th>Cliente</th><th>Quem</th><th>IP</th><th>Detalhes</th></tr></thead>

@@ -54,9 +54,10 @@ export default function App() {
 }
 
 function AreaMaster({ me, logout }: { me: Me; logout: () => void }) {
-  const hash = useHash('#master');
+  const [hash, qs] = useHash('#master').split('?');
+  const tenantId = new URLSearchParams(qs ?? '').get('tenant') ?? undefined;
   const page = hash === '#master-clientes' ? <Clientes /> : hash === '#master-financeiro' ? <Financeiro />
-    : hash === '#master-seguranca' ? <Seguranca /> : <Visao />;
+    : hash === '#master-seguranca' ? <Seguranca key={tenantId ?? 'all'} tenantId={tenantId} /> : <Visao />;
   return (
     <Shell brand="Agência Hub" sub={me.email} logo="A" logoColor="var(--accent)" nav={navDono} current={hash}>
       {me.panic?.on && <p className="banner panic" role="alert">MODO PÂNICO ATIVO: IA, anúncios e envios de WhatsApp estão desligados. <a href="#master-seguranca">Ver</a></p>}
@@ -71,13 +72,20 @@ function AreaCliente({ me, logout }: { me: Me; logout: () => void }) {
   const query = new URLSearchParams(qs ?? '');
   const initials = (me.tenant_name ?? '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
   return (
-    <Shell brand={me.tenant_name ?? 'Meu negócio'} sub={me.city ?? me.email} logo={initials} logoColor="var(--teal)"
+    <Shell brand={me.tenant_name ?? 'Meu negócio'} sub={me.impersonating ? 'Painel do cliente (agência)' : me.city ?? me.email} logo={initials} logoColor="var(--teal)"
            nav={navCliente} current={hash} flush={hash === '#atendimento'}>
+      {me.impersonating && (
+        <div className="banner" role="status" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between',
+             borderStyle: 'solid', borderColor: 'var(--accent)', margin: hash === '#atendimento' ? 16 : 0 }}>
+          <span>Você está no painel de <b>{me.tenant_name}</b> como agência ({me.email}). Tudo fica registrado na auditoria.</span>
+          <button className="btn btn-primary" onClick={async () => { await api('/auth/impersonate/stop', { body: {} }); location.hash = '#master-clientes'; location.reload(); }}>
+            Voltar ao Painel Master</button>
+        </div>)}
       {hash === '#aprovacoes' ? <ApprovalQueue /> : hash === '#atendimento' ? <Inbox /> : hash === '#negocio' ? <Negocio />
         : hash === '#marca' ? <Marca />
         : hash === '#anuncios' ? <Anuncios isOwner={me.role === 'owner'} />
         : hash === '#conexoes' ? <Conexoes query={query} isOwner={me.role === 'owner'} /> : <Resumo me={me} />}
-      {hash !== '#atendimento' && <div className="actions"><button className="btn" onClick={logout}>Sair</button></div>}
+      {hash !== '#atendimento' && !me.impersonating && <div className="actions"><button className="btn" onClick={logout}>Sair</button></div>}
     </Shell>
   );
 }

@@ -14,6 +14,16 @@ salva e faz o deploy. No primeiro login aparece um QR Code para o aplicativo aut
 - **Clientes e equipe:** botão **"Esqueci minha senha"** na tela de login (precisa do e-mail configurado: `SMTP_*`).
   Quem perdeu o celular do 2FA: o administrador usa **Clientes → Resetar acesso**.
 
+## Agência x clientes
+
+- **Abrir painel do cliente** (Painel Master → Clientes): a agência entra em todas as áreas do cliente (dossiê, calendário,
+  artes, aprovações, anúncios, WhatsApp, conexões) sem a senha dele; pede o código do 2FA e tudo fica na auditoria com o
+  e-mail da agência. Faixa no topo com "Voltar ao Painel Master".
+- **Atividade**: tudo o que acontece na conta de cada cliente (logins, 2FA, aprovações, publicações, anúncios, conexões).
+- **Criar conta** na tela de login: o cliente se cadastra, mas só entra depois de **"Aprovar acesso"** no Painel Master
+  (aviso na Visão geral e e-mail para a agência, se o SMTP estiver configurado).
+- **Cliente VIP** (só a agência vê): isento de cobrança, sem teto de IA e com a quantidade de conteúdos do maior plano.
+
 ## Como colocar no ar (Render)
 
 1. Render → **New → Blueprint** → este repositório (`render.yaml` cria API + Postgres + Redis já ligados).

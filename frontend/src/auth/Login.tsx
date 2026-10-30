@@ -4,6 +4,7 @@ import { api } from '../api';
 type Step =
   | { kind: 'password' }
   | { kind: 'forgot' }
+  | { kind: 'signup' }
   | { kind: 'code'; ticket: string; method: 'totp' | 'whatsapp' | 'totp_setup'; qr?: string; secret?: string };
 
 /** Login com 2FA obrigatório. No primeiro acesso, o usuário cadastra o app autenticador pelo QR Code. */
@@ -33,13 +34,15 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
 
   return (
     <div className="center-page">
-      <form className="card auth-card" onSubmit={e => { e.preventDefault(); if (step.kind !== 'forgot') submit(); }}>
+      <form className="card auth-card" onSubmit={e => { e.preventDefault(); if (step.kind !== 'forgot' && step.kind !== 'signup') submit(); }}>
         <div>
           <span className="eyebrow card-sub">Agência Hub</span>
-          <h1>{step.kind === 'password' ? 'Entrar' : step.kind === 'forgot' ? 'Esqueci minha senha' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
+          <h1>{step.kind === 'password' ? 'Entrar' : step.kind === 'forgot' ? 'Esqueci minha senha' : step.kind === 'signup' ? 'Criar conta' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
         </div>
 
-        {step.kind === 'forgot' ? (
+        {step.kind === 'signup' ? (
+          <Signup onBack={() => setStep({ kind: 'password' })} />
+        ) : step.kind === 'forgot' ? (
           <Forgot email={email} onBack={() => setStep({ kind: 'password' })} />
         ) : step.kind === 'password' ? (
           <>
@@ -73,14 +76,18 @@ export default function Login({ onDone }: { onDone: (mustChangePassword: boolean
           </>
         )}
 
-        {step.kind !== 'forgot' && <>
+        {step.kind !== 'forgot' && step.kind !== 'signup' && <>
           {err && <p className="msg err" role="alert">{err}</p>}
           <button className="btn btn-primary" disabled={busy || (step.kind === 'code' && code.length !== 6)}>
             {busy ? 'Aguarde…' : step.kind === 'password' ? 'Continuar' : 'Entrar'}
           </button>
         </>}
         {step.kind === 'password' && (
-          <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
+          <>
+            <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
+            <p className="card-sub" style={{ margin: 0, textAlign: 'center' }}>Ainda não tem conta?{' '}
+              <button type="button" className="btn" style={{ minHeight: 36, padding: '0 12px' }} onClick={() => { setErr(''); setStep({ kind: 'signup' }); }}>Criar conta</button></p>
+          </>
         )}
         {step.kind === 'code' && (
           <button type="button" className="btn" onClick={() => { setStep({ kind: 'password' }); setErr(''); }}>Voltar</button>
@@ -172,5 +179,44 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
         <button className="btn btn-primary">{done ? 'Ir para o login' : 'Salvar senha nova'}</button>
       </form>
     </div>
+  );
+}
+
+/** Cadastro do próprio cliente. O acesso só é liberado depois que a agência aprova. */
+function Signup({ onBack }: { onBack: () => void }) {
+  const [f, setF] = useState({ business: '', niche: '', city: '', name: '', email: '', phone: '', password: '', again: '' });
+  const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const set = (k: keyof typeof f) => (e: any) => setF({ ...f, [k]: e.target.value });
+  async function send() {
+    if (f.password !== f.again) return setMsg({ kind: 'err', text: 'As senhas não são iguais' });
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api('/auth/signup', { body: { business: f.business, niche: f.niche || undefined, city: f.city || undefined, name: f.name,
+        email: f.email, phone: f.phone.replace(/\D/g, '') || undefined, password: f.password } });
+      setDone(true); setMsg({ kind: 'ok', text: r.message });
+    } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
+    finally { setBusy(false); }
+  }
+  if (done) return <><p className="msg ok" role="status">{msg?.text}</p><button type="button" className="btn btn-primary" onClick={onBack}>Voltar para o login</button></>;
+  const field = (k: keyof typeof f, label: string, props: Record<string, unknown> = {}) =>
+    <label className="field">{label}<input value={f[k]} onChange={set(k)} {...props} /></label>;
+  return (
+    <>
+      <p style={{ margin: 0 }} className="card-sub">Preencha os dados. A agência confere e libera o seu acesso.</p>
+      {field('business', 'Nome do negócio', { required: true })}
+      {field('niche', 'Ramo', { placeholder: 'padaria, clínica, barbearia, consultoria…' })}
+      {field('city', 'Cidade / bairro')}
+      {field('name', 'Seu nome', { required: true, autoComplete: 'name' })}
+      {field('email', 'E-mail', { type: 'email', required: true, autoComplete: 'email' })}
+      {field('phone', 'WhatsApp (com DDD)', { inputMode: 'tel', placeholder: '19 99999-9999' })}
+      {field('password', 'Senha (mínimo 10 caracteres)', { type: 'password', minLength: 10, required: true, autoComplete: 'new-password' })}
+      {field('again', 'Repita a senha', { type: 'password', minLength: 10, required: true, autoComplete: 'new-password' })}
+      {msg && <p className={`msg ${msg.kind}`} role="alert">{msg.text}</p>}
+      <button type="button" className="btn btn-primary" disabled={busy || !f.business || !f.name || !f.email.includes('@') || f.password.length < 10}
+              onClick={send}>{busy ? 'Enviando…' : 'Cadastrar'}</button>
+      <button type="button" className="btn" onClick={onBack}>Já tenho conta</button>
+    </>
   );
 }

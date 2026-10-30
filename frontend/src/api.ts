@@ -26,4 +26,5 @@ export interface Me {
   totp_enabled: boolean; must_change_password: boolean;
   tenant_id: string | null; tenant_name: string | null; city: string | null; niche: string | null; plan: string | null;
   panic?: { on: boolean; reason?: string; at?: string };
+  impersonating?: boolean;   // administrador da agência operando o painel deste cliente
 }
