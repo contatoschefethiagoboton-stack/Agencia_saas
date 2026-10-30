@@ -41,6 +41,17 @@ services:
         sync: false
       - key: ADMIN_PASSWORD       # mínimo 10 caracteres; troque depois do 1º login
         sync: false
+      # E-mail para "Esqueci minha senha" (qualquer SMTP: Gmail com senha de app, Zoho, Resend, SendGrid...)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM            # ex.: Agência Hub <nao-responda@suaagencia.com.br>
+        sync: false
       - key: ASAAS_SPLIT_JSON     # split nativo: [{"walletId":"...","percentualValue":20}]
         sync: false
       - key: PUBLIC_URL
