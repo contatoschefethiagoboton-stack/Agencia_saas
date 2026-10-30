@@ -10,15 +10,29 @@
 import argon2 from 'argon2';
 import pg from 'pg';
 
-const [argEmail, argPass] = process.argv.slice(2);
-const email = (argEmail ?? process.env.ADMIN_EMAIL ?? '').trim().toLowerCase();
-const password = argPass ?? process.env.ADMIN_PASSWORD ?? '';
-const url = process.env.DATABASE_URL ?? process.env.DATABASE_URL_ADMIN;
-const reset = ['1', 'true', 'sim'].includes(String(process.env.ADMIN_RESET ?? '').toLowerCase());
+/** Lê a variável tolerando erros comuns no painel do Render: minúsculas, espaços no nome e no valor. */
+const envVar = (name: string) => {
+  const key = Object.keys(process.env).find(k => k.trim().toUpperCase() === name);
+  const v = key ? process.env[key]?.trim() : undefined;
+  return v ? v.replace(/^["']|["']$/g, '') : undefined;          // aspas coladas junto do valor
+};
 
-if (!url || !email) process.exit(0);          // nada a fazer
+const [argEmail, argPass] = process.argv.slice(2);
+const email = (argEmail ?? envVar('ADMIN_EMAIL') ?? '').trim().toLowerCase();
+const password = argPass ?? envVar('ADMIN_PASSWORD') ?? '';
+const url = process.env.DATABASE_URL ?? process.env.DATABASE_URL_ADMIN;
+const reset = ['1', 'true', 'sim', 'yes'].includes(String(envVar('ADMIN_RESET') ?? '').toLowerCase());
+
+if (!url) { console.log('[bootstrap] DATABASE_URL não definida: administrador não criado'); process.exit(0); }
+if (!email || !password) {
+  // diz exatamente o que chegou ao servidor (só nomes, nunca valores)
+  const seen = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'ADMIN_RESET'].map(n => `${n}: ${envVar(n) ? 'definida' : 'NÃO ENCONTRADA'}`).join(' | ');
+  console.log(`[bootstrap] administrador não criado/alterado. ${seen}`);
+  console.log('[bootstrap] Para criar ou redefinir o acesso: Render → seu serviço Web → Environment → ADMIN_EMAIL, ADMIN_PASSWORD (e ADMIN_RESET=1 se já existir) → Save, rebuild, and deploy.');
+  process.exit(0);
+}
 if (password.length < 10) {
-  console.error('[bootstrap] ADMIN_PASSWORD precisa ter pelo menos 10 caracteres');
+  console.error('[bootstrap] ADMIN_PASSWORD precisa ter pelo menos 10 caracteres: administrador não criado/alterado');
   process.exit(argEmail ? 1 : 0);
 }
 
