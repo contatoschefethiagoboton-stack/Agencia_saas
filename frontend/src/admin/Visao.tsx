@@ -4,7 +4,7 @@ import { ProgressBar } from '../ui/Charts';
 
 interface Dashboard {
   mrrCents: string; carteiraPessoalCents: string; fundoMidiaCents: string; conteudosPendentes: number;
-  clientes: { ativos: number; bloqueados: number };
+  clientes: { ativos: number; bloqueados: number; aguardando: number; vip: number };
   usoIA: { name: string; cost_cents: string; quota_cents: string }[];
   dre: { id: string; name: string; assinatura: string; setup_avulsos: string; verba_midia_bruta: string; taxa_gestao: string; custo_api: string }[];
 }
@@ -20,7 +20,7 @@ export default function Visao() {
   const kpis = [
     ['Receita recorrente (mês)', brl(d.mrrCents)], ['Lucro líquido do mês', brl(totalLucro)],
     ['Disponível para saque', brl(d.carteiraPessoalCents)], ['Fundo de mídia da agência', brl(d.fundoMidiaCents)],
-    ['Clientes ativos', String(d.clientes.ativos)], ['Contas bloqueadas', String(d.clientes.bloqueados)],
+    ['Clientes ativos', String(d.clientes.ativos)], ['Contas bloqueadas', String(d.clientes.bloqueados)], ['Clientes VIP (só você vê)', String(d.clientes.vip)],
   ];
 
   return (
@@ -31,6 +31,12 @@ export default function Visao() {
           <h1>Visão geral</h1>
         </div>
       </header>
+
+      {d.clientes.aguardando > 0 && (
+        <section className="row" role="status" style={{ alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px', borderRadius: 16, background: 'var(--warn-bg)', border: '1px solid var(--warn)' }}>
+          <b style={{ color: 'var(--warn)' }}>{d.clientes.aguardando} {d.clientes.aguardando === 1 ? 'cadastro aguardando' : 'cadastros aguardando'} sua aprovação</b>
+          <a className="btn btn-primary" href="#master-clientes">Revisar</a>
+        </section>)}
 
       <section className="grid-kpi" aria-label="Indicadores principais">
         {kpis.map(([label, value]) => (

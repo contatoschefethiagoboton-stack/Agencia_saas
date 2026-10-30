@@ -26,7 +26,7 @@ export default function Resumo({ me }: { me: Me }) {
   return (
     <>
       <header className="page-head">
-        <div><span className="eyebrow">{[me.tenant_name, s.negocio.city].filter(Boolean).join(' · ')}</span><h1>Olá{me.name ? `, ${me.name.split(' ')[0]}` : ''}</h1></div>
+        <div><span className="eyebrow">{[me.tenant_name, s.negocio.city].filter(Boolean).join(' · ')}</span><h1>{me.impersonating ? `Painel de ${me.tenant_name}` : `Olá${me.name ? `, ${me.name.split(' ')[0]}` : ''}`}</h1></div>
       </header>
 
       {s.alertas.map(a => (

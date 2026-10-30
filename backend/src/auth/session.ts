@@ -6,6 +6,7 @@ export interface Claims {
   sub: string; tid: string | null; role: 'owner' | 'member' | 'platform_admin';
   tv: number;          // token_version — compara com o banco para revogação instantânea
   mfaAt: number;       // epoch s do último 2FA (step-up para ações críticas)
+  imp?: boolean;       // administrador da agência operando o painel de um cliente (tid = cliente)
 }
 
 export const deviceHash = (req: Request) => {
@@ -14,8 +15,8 @@ export const deviceHash = (req: Request) => {
 };
 
 export function setSession(res: Response, claims: Claims) {
-  const { sub, tid, role, tv, mfaAt } = claims;          // nunca copia exp/iat de um token antigo
-  const token = jwt.sign({ sub, tid, role, tv, mfaAt }, process.env.JWT_SECRET!, { expiresIn: '30m', algorithm: 'HS256' });
+  const { sub, tid, role, tv, mfaAt, imp } = claims;     // nunca copia exp/iat de um token antigo
+  const token = jwt.sign({ sub, tid, role, tv, mfaAt, ...(imp ? { imp: true } : {}) }, process.env.JWT_SECRET!, { expiresIn: '30m', algorithm: 'HS256' });
   res.cookie('sid', token, { httpOnly: true, secure: true, sameSite: 'strict', maxAge: 30 * 60_000 });
 }
 

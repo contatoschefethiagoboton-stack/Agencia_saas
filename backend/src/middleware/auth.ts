@@ -23,6 +23,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const { token_version, tenant_status } = JSON.parse(state);
   if (token_version !== s.tv) return res.status(401).json({ error: 'Sessão revogada' });
   if (tenant_status !== 'active') return res.status(423).json({ error: 'Conta suspensa. Fale com o suporte.' });
+  if (s.imp) {   // admin no painel de um cliente: o cliente bloqueado (kill switch) também fecha esse acesso
+    const exit = /^\/api\/auth\/(me|impersonate\/stop)(\?|$)/.test(req.originalUrl);   // mas a saída continua aberta
+    const t = (await adminPool.query(`SELECT status FROM tenants WHERE id = $1`, [s.tid])).rows[0];
+    if (t?.status !== 'active' && !exit) return res.status(423).json({ error: 'Este cliente está bloqueado. Volte ao Painel Master.', imp: true });
+  }
   if (s.role !== 'platform_admin' && !s.tid) return res.status(403).end();
 
   req.user = s;

@@ -14,6 +14,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { panicInfo } from '../security/panic.js';
 import { redis } from '../redis.js';
 import crypto from 'node:crypto';
+import rateLimit from 'express-rate-limit';
 import { mailReady, sendMail } from '../mail.js';
 import { publicUrl } from '../config.js';
 
@@ -65,6 +66,12 @@ authRouter.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ error: 'E-mail ou senha incorretos' });   // mensagem genérica
     }
 
+    // cadastro feito pelo próprio cliente só entra depois que a agência aprova
+    if (u.tenant_id) {
+      const st = (await c.query(`SELECT status FROM tenants WHERE id = $1`, [u.tenant_id])).rows[0]?.status;
+      if (st === 'pending') return res.status(403).json({ error: 'Seu cadastro está aguardando a aprovação da agência. Você recebe um aviso quando for liberado.' });
+      if (st === 'rejected') return res.status(403).json({ error: 'Seu cadastro não foi aprovado. Fale com a agência.' });
+    }
     if (u.totp_enabled) return res.json({ ticket: signTicket({ sub: u.id, method: 'totp' }), method: 'totp' });
     if (u.phone_e164 && whatsappOtpReady()) {
       const ch = await issueOtp(c, u.id, u.phone_e164, 'login');
@@ -132,11 +139,25 @@ authRouter.post('/logout', async (req, res) => {
 
 /** Quem está logado: o frontend decide entre Painel Master e painel do negócio. */
 authRouter.get('/me', requireAuth, async (req, res) => {
+  const s = req.user!;
   const { rows } = await adminPool.query(
     `SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.must_change_password,
             t.id AS tenant_id, t.name AS tenant_name, t.city, t.niche, t.plan, t.status AS tenant_status
-       FROM users u LEFT JOIN tenants t ON t.id = u.tenant_id WHERE u.id = $1`, [req.user!.sub]);
-  res.json({ ...rows[0], panic: req.user!.role === 'platform_admin' ? await panicInfo() : undefined });
+       FROM users u LEFT JOIN tenants t ON t.id = coalesce($2::uuid, u.tenant_id) WHERE u.id = $1`,
+    [s.sub, s.imp ? s.tid : null]);
+  res.json({ ...rows[0], ...(s.imp ? { role: 'owner', impersonating: true } : {}),
+             panic: s.role === 'platform_admin' ? await panicInfo() : undefined });
+});
+
+/** Sai do painel do cliente e volta ao Painel Master. */
+authRouter.post('/impersonate/stop', requireAuth, async (req, res) => {
+  const s = req.user!;
+  if (!s.imp) return res.status(400).json({ error: 'Você não está no painel de um cliente' });
+  const u = (await adminPool.query(`SELECT role FROM users WHERE id = $1`, [s.sub])).rows[0];
+  if (u?.role !== 'platform_admin') return res.status(403).end();
+  await audit({ actorId: s.sub, tenantId: s.tid, ip: req.ip, action: 'support.panel_closed' });
+  setSession(res, { sub: s.sub, tid: null, role: 'platform_admin', tv: s.tv, mfaAt: s.mfaAt });
+  res.json({ ok: true });
 });
 
 authRouter.post('/password', requireAuth, async (req, res) => {
@@ -238,5 +259,48 @@ authRouter.post('/reset', loginLimiter, async (req, res) => {
     await redis.del(`authstate:${r.user_id}`);
     res.json({ ok: true });
   } catch (e) { await c.query('ROLLBACK'); throw e; }
+  finally { c.release(); }
+});
+
+// ---------- Criar conta (o cliente se cadastra; a agência aprova) ----------
+const signupLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false,
+                                  message: { error: 'Muitos cadastros deste endereço. Tente mais tarde.' } });
+
+authRouter.post('/signup', signupLimiter, async (req, res) => {
+  const b = z.object({
+    business: z.string().trim().min(2).max(120), niche: z.string().trim().max(60).optional(), city: z.string().trim().max(80).optional(),
+    name: z.string().trim().min(2).max(120), email: z.string().email().max(200), phone: z.string().regex(/^\+?\d{10,15}$/).optional(),
+    password: z.string().min(10).max(200),
+  }).safeParse(req.body);
+  if (!b.success) return res.status(400).json({ error: 'Confira os dados: e-mail válido e senha com pelo menos 10 caracteres' });
+  const d = b.data, email = d.email.toLowerCase();
+  const hash = await argon2.hash(d.password, { type: argon2.argon2id });
+  const c = await appPool.connect();
+  try {
+    await c.query('BEGIN');
+    if ((await c.query(`SELECT 1 FROM users WHERE email = $1`, [email])).rowCount) {
+      await c.query('ROLLBACK');
+      return res.status(409).json({ error: 'Este e-mail já tem cadastro. Use "Entrar" ou "Esqueci minha senha".' });
+    }
+    const slug = `${d.business.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'cliente'}-${crypto.randomBytes(2).toString('hex')}`;
+    const t = (await c.query(`INSERT INTO tenants (name, slug, niche, city, status, signup) VALUES ($1, $2, $3, $4, 'pending', 'self') RETURNING id`,
+                             [d.business, slug, d.niche ?? null, d.city ?? null])).rows[0];
+    const phone = d.phone ? (d.phone.startsWith('+') ? d.phone : `+${d.phone.length <= 11 ? '55' : ''}${d.phone}`) : null;
+    await c.query(`INSERT INTO users (tenant_id, email, password_hash, phone_e164, role, name) VALUES ($1, $2, $3, $4, 'owner', $5)`,
+                  [t.id, email, hash, phone, d.name]);
+    await c.query("SELECT set_config('app.tenant_id', $1, true)", [t.id]);   // RLS: o dossiê é do tenant recém-criado
+    await c.query(`INSERT INTO business_dossier (tenant_id, data) VALUES ($1, $2)`, [t.id, { nome: d.business, nicho: d.niche, cidade: d.city }]);
+    await audit({ tenantId: t.id, ip: req.ip, action: 'tenant.signup', meta: { email } }, c);
+    await c.query('COMMIT');
+    // avisa a agência por e-mail (se configurado)
+    if (mailReady()) {
+      const admins = (await adminPool.query(`SELECT email FROM users WHERE role = 'platform_admin'`)).rows;
+      for (const a of admins) void sendMail(a.email, `Novo cadastro aguardando aprovação: ${d.business}`,
+        `${d.name} (${email}) cadastrou "${d.business}". Aprove ou recuse em ${publicUrl()}/#master-clientes`,
+        `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}/#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
+        .catch(e => console.error('[e-mail]', (e as Error).message));
+    }
+    res.status(201).json({ ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a agência aprovar.' });
+  } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
   finally { c.release(); }
 });

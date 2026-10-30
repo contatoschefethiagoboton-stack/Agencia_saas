@@ -55,7 +55,8 @@ const Calendar = z.object({ items: z.array(Item).min(1).max(60) });
 export async function generateMonthlyCalendar(tenantId: string, month: string) {
   const ctx = await withTenant(tenantId, async c => ({
     dossier: (await c.query('SELECT data FROM business_dossier WHERE tenant_id = $1', [tenantId])).rows[0]?.data,
-    plan: (await c.query(`SELECT p.posts_per_month, t.niche FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1`, [tenantId])).rows[0],
+    plan: (await c.query(`SELECT CASE WHEN t.vip THEN (SELECT max(posts_per_month) FROM plans WHERE active) ELSE p.posts_per_month END AS posts_per_month,
+                                 t.niche FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1`, [tenantId])).rows[0],
     already: (await c.query(`SELECT count(*)::int AS n FROM content_items WHERE to_char(scheduled_for, 'YYYY-MM') = $1
                              AND status <> 'rejected'`, [month])).rows[0].n,
   }));

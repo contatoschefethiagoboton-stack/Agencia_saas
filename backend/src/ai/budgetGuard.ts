@@ -17,7 +17,8 @@ export async function guardedAiCall<T>(tenantId: string, estimateCents: number,
     const { rows } = await c.query(`
       INSERT INTO api_usage (tenant_id, provider, period, cost_cents, quota_cents)
       VALUES ($1, $3, date_trunc('month', now())::date, $2,
-              coalesce((SELECT p.ai_quota_cents FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1), 5000))
+              coalesce((SELECT CASE WHEN t.vip THEN 100000000 ELSE p.ai_quota_cents END
+                          FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1), 5000))
       ON CONFLICT (tenant_id, provider, period)
         DO UPDATE SET cost_cents = api_usage.cost_cents + EXCLUDED.cost_cents
         WHERE api_usage.cost_cents + EXCLUDED.cost_cents <= api_usage.quota_cents

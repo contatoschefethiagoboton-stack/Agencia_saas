@@ -10,6 +10,9 @@ import { redis } from '../redis.js';
 import { pauseAllTenantCampaigns } from '../integrations/meta/ads.js';
 import { billingReady, createCharge, createSubscription } from '../finance/billing.js';
 import { panicInfo, setPanic } from '../security/panic.js';
+import { setSession } from '../auth/session.js';
+import { mailReady, sendMail } from '../mail.js';
+import { publicUrl } from '../config.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
@@ -37,7 +40,9 @@ adminRouter.get('/dashboard', async (_req, res) => {
     const profitAcc = await accountId(c, 'platform_profit');
     const fundAcc = await accountId(c, 'agency_media_fund');
     const counts = (await c.query(`SELECT count(*) FILTER (WHERE status = 'active')::int AS ativos,
-                                          count(*) FILTER (WHERE status <> 'active')::int AS bloqueados FROM tenants`)).rows[0];
+                                          count(*) FILTER (WHERE status IN ('suspended', 'killed'))::int AS bloqueados,
+                                          count(*) FILTER (WHERE status = 'pending')::int AS aguardando,
+                                          count(*) FILTER (WHERE vip)::int AS vip FROM tenants`)).rows[0];
     const ia = (await c.query(`SELECT t.name, u.cost_cents::text, u.quota_cents::text FROM api_usage u JOIN tenants t ON t.id = u.tenant_id
                                WHERE u.period = date_trunc('month', now())::date ORDER BY u.cost_cents DESC LIMIT 10`)).rows;
     const pend = (await c.query(`SELECT count(*)::int AS n FROM content_items WHERE status = 'pending_approval'`)).rows[0].n;
@@ -130,13 +135,15 @@ adminRouter.post('/agency-campaigns/fund', requireRecentMfa, async (req, res) =>
 adminRouter.get('/tenants', async (_req, res) => {
   res.json(await withAdmin(async c => (await c.query(`
     SELECT t.id, t.name, t.slug, t.niche, t.city, t.plan, t.status, t.suspended_reason, t.created_at,
+           t.vip, t.vip_note, t.signup,
+           (SELECT max(a.at) FROM audit_log a WHERE a.tenant_id = t.id AND a.action = 'auth.login_ok') AS ultimo_acesso,
            t.asaas_subscription_id IS NOT NULL AS cobranca_ativa,
            (SELECT email FROM users u WHERE u.tenant_id = t.id AND u.role = 'owner' ORDER BY u.created_at LIMIT 1) AS owner_email,
            (SELECT count(*)::int FROM wa_numbers n WHERE n.tenant_id = t.id AND n.status = 'active') AS wa_ativos,
            (SELECT min(quality_rating) FROM wa_numbers n WHERE n.tenant_id = t.id) AS wa_qualidade,
            (SELECT count(*)::int FROM channel_connections cc WHERE cc.tenant_id = t.id AND (cc.needs_reconnect
               OR cc.expires_at < now() + interval '10 days')) AS conexoes_atencao
-      FROM tenants t ORDER BY t.created_at DESC`)).rows));
+      FROM tenants t ORDER BY (t.status = 'pending') DESC, t.created_at DESC`)).rows));
 });
 
 const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -189,6 +196,8 @@ adminRouter.post('/tenants', async (req, res) => {
 adminRouter.post('/tenants/:id/billing', async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
   const r = await withAdmin(async c => {
+    if ((await c.query(`SELECT vip FROM tenants WHERE id = $1`, [id])).rows[0]?.vip)
+      throw Object.assign(new Error('Cliente VIP: isento de cobrança. Tire o VIP para cobrar.'), { status: 409 });
     const owner = (await c.query(`SELECT email FROM users WHERE tenant_id = $1 AND role = 'owner' LIMIT 1`, [id])).rows[0];
     const subscriptionId = await createSubscription(c, id, owner?.email);
     await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'billing.subscription_started' }, c);
@@ -201,15 +210,20 @@ adminRouter.patch('/tenants/:id', async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
   const b = z.object({ plan: z.string().optional(), mediaFeeBps: z.number().int().min(0).max(5000).optional(),
                        document: z.string().max(20).optional(), niche: z.string().max(60).optional(),
-                       city: z.string().max(80).optional() }).parse(req.body);
+                       city: z.string().max(80).optional(), vip: z.boolean().optional(),
+                       vipNote: z.string().trim().max(200).optional() }).parse(req.body);
   await withAdmin(async c => {
     if (b.plan && !(await c.query(`SELECT 1 FROM plans WHERE id = $1`, [b.plan])).rowCount)
       throw Object.assign(new Error('Plano inexistente'), { status: 400 });
     await c.query(`UPDATE tenants SET plan = coalesce($2, plan), media_fee_bps = coalesce($3, media_fee_bps),
                      document = coalesce($4, document), niche = coalesce($5, niche), city = coalesce($6, city) WHERE id = $1`,
                   [id, b.plan ?? null, b.mediaFeeBps ?? null, b.document ?? null, b.niche ?? null, b.city ?? null]);
-    if (b.plan) await c.query(`UPDATE api_usage SET quota_cents = (SELECT ai_quota_cents FROM plans WHERE id = $2)
-                                WHERE tenant_id = $1 AND period = date_trunc('month', now())::date`, [id, b.plan]);
+    if (b.vip !== undefined || b.vipNote !== undefined)
+      await c.query(`UPDATE tenants SET vip = coalesce($2, vip), vip_note = coalesce($3, vip_note) WHERE id = $1`, [id, b.vip ?? null, b.vipNote ?? null]);
+    if (b.plan || b.vip !== undefined)   // teto de IA do mês acompanha plano/VIP na hora
+      await c.query(`UPDATE api_usage u SET quota_cents = CASE WHEN t.vip THEN 100000000 ELSE p.ai_quota_cents END
+                       FROM tenants t JOIN plans p ON p.id = t.plan
+                      WHERE u.tenant_id = $1 AND t.id = $1 AND u.period = date_trunc('month', now())::date`, [id]);
     await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.updated', meta: b }, c);
   });
   res.json({ ok: true });
@@ -357,4 +371,52 @@ adminRouter.post('/tenants/:id/charges', async (req, res) => {
     return charge;
   });
   res.status(201).json(r);
+});
+
+/**
+ * ABRIR O PAINEL DO CLIENTE: a agência opera o painel do negócio (dossiê, calendário, artes, anúncios,
+ * conexões) sem a senha do cliente. Exige 2FA recente; tudo o que for feito fica na auditoria com o
+ * e-mail do administrador; cliente bloqueado não pode ser aberto.
+ */
+adminRouter.post('/tenants/:id/impersonate', requireRecentMfa, async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const t = await withAdmin(async c => {
+    const t = (await c.query(`SELECT name, status FROM tenants WHERE id = $1`, [id])).rows[0];
+    if (!t) throw Object.assign(new Error('Cliente não encontrado'), { status: 404 });
+    if (t.status !== 'active') throw Object.assign(new Error('Cliente bloqueado: reative antes de abrir o painel'), { status: 409 });
+    await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'support.panel_opened' }, c);
+    return t;
+  });
+  setSession(res, { sub: req.user!.sub, tid: id, role: 'owner', tv: req.user!.tv, mfaAt: req.user!.mfaAt, imp: true });
+  res.json({ ok: true, cliente: t.name });
+});
+
+// ---------- Aprovação de cadastro (cliente que se cadastrou sozinho só entra depois disto) ----------
+adminRouter.post('/tenants/:id/approve', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const owner = await withAdmin(async c => {
+    const r = await c.query(`UPDATE tenants SET status = 'active', decided_at = now(), decided_by = $2
+                             WHERE id = $1 AND status IN ('pending', 'rejected') RETURNING name`, [id, req.user!.sub]);
+    if (!r.rowCount) throw Object.assign(new Error('Este cadastro não está aguardando aprovação'), { status: 409 });
+    await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.approved' }, c);
+    const o = (await c.query(`SELECT email, name FROM users WHERE tenant_id = $1 AND role = 'owner' LIMIT 1`, [id])).rows[0];
+    return { ...o, business: r.rows[0].name };
+  });
+  if (owner?.email && mailReady())
+    void sendMail(owner.email, 'Seu acesso foi liberado', `Olá${owner.name ? `, ${owner.name.split(' ')[0]}` : ''}! O cadastro de "${owner.business}" foi aprovado. Entre em ${publicUrl()}`,
+      `<p>Olá${owner.name ? `, ${owner.name.split(' ')[0]}` : ''}!</p><p>O cadastro de <b>${owner.business}</b> foi aprovado.</p><p><a href="${publicUrl()}">Entrar na plataforma</a></p>`)
+      .catch(e => console.error('[e-mail]', (e as Error).message));
+  res.json({ ok: true });
+});
+
+adminRouter.post('/tenants/:id/reject', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const reason = z.string().trim().max(300).optional().parse(req.body?.reason);
+  await withAdmin(async c => {
+    const r = await c.query(`UPDATE tenants SET status = 'rejected', decided_at = now(), decided_by = $2, suspended_reason = $3
+                             WHERE id = $1 AND status = 'pending'`, [id, req.user!.sub, reason ?? null]);
+    if (!r.rowCount) throw Object.assign(new Error('Este cadastro não está aguardando aprovação'), { status: 409 });
+    await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.rejected', meta: { reason } }, c);
+  });
+  res.json({ ok: true });
 });
