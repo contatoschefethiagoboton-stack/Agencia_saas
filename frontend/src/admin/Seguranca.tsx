@@ -29,12 +29,12 @@ export default function Seguranca({ tenantId }: { tenantId?: string }) {
     setMsg(null);
     let reason: string | null = null;
     if (!panic?.on) {
-      reason = prompt('MODO PÂNICO: desliga IA, anúncios e envios de WhatsApp de TODOS os clientes e pausa as campanhas.\nDescreva o motivo:');
+      reason = prompt('MODO PÂNICO: congela TODOS os robôs (nenhuma ordem nova é enviada às corretoras) e bloqueia novas conexões.\nDescreva o motivo:');
       if (!reason || reason.trim().length < 5) return;
-    } else if (!confirm('Religar as integrações externas?')) return;
+    } else if (!confirm('Descongelar os robôs?')) return;
     try {
       await guard(() => api('/admin/security/panic', { body: { on: !panic?.on, reason: reason ?? undefined } }));
-      setMsg({ kind: 'ok', text: panic?.on ? 'Integrações religadas.' : 'Modo pânico ATIVO. Integrações externas desligadas.' });
+      setMsg({ kind: 'ok', text: panic?.on ? 'Robôs liberados.' : 'Modo pânico ATIVO. Todos os robôs estão congelados.' });
       sum.reload(); logs.reload();
     } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
   }
@@ -49,9 +49,9 @@ export default function Seguranca({ tenantId }: { tenantId?: string }) {
           <div>
             <h2>Modo pânico</h2>
             <span className="card-sub">{panic?.on ? `ATIVO desde ${panic.at ? dataHora(panic.at) : ''} — ${panic.reason ?? ''}` :
-              'Desligado. Use se suspeitar de invasão ou vazamento de chave: corta IA, anúncios e WhatsApp na hora.'}</span>
+              'Desligado. Use se suspeitar de invasão, vazamento de chave ou comportamento estranho do mercado: congela todos os robôs na hora.'}</span>
           </div>
-          <button className={`btn ${panic?.on ? 'btn-good' : 'btn-danger'}`} onClick={togglePanic}>{panic?.on ? 'Religar integrações' : 'Ativar modo pânico'}</button>
+          <button className={`btn ${panic?.on ? 'btn-good' : 'btn-danger'}`} onClick={togglePanic}>{panic?.on ? 'Descongelar robôs' : 'Ativar modo pânico'}</button>
         </div>
       </section>
 
@@ -73,7 +73,7 @@ export default function Seguranca({ tenantId }: { tenantId?: string }) {
 
       <section className="card">
         <div className="card-head"><div><h2>{tenant ? 'Tudo o que acontece na conta do cliente' : 'Logs de auditoria'}</h2>
-            <span className="card-sub">Logins, dispositivos novos, aprovações, publicações, anúncios, conexões e alterações.</span></div>
+            <span className="card-sub">Logins, dispositivos novos, aprovações, robôs, corretoras e alterações.</span></div>
           <div className="actions">
             <select aria-label="Filtrar por cliente" value={tenant} onChange={e => setTenant(e.target.value)}
                     style={{ background: 'var(--card-2)', border: '1px solid var(--border-strong)', borderRadius: 10, minHeight: 44, padding: '0 10px' }}>

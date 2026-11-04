@@ -26,7 +26,7 @@ r = await cli('/auth/login', { email: 'maria@bomgrao.com', password: t.tempPassw
 const mSecret = r.j.secret;
 await cli('/auth/login/verify', { ticket: r.j.ticket, code: code(mSecret) });
 await cli('/auth/password', { current: t.tempPassword, next: 'SenhaAntiga!123' });
-ok((await cli('/client/summary')).s === 200, 'cliente logado');
+ok((await cli('/bots/plan')).s === 200, 'cliente logado');
 
 // ---------- Esqueci minha senha ----------
 const pub = client();
@@ -46,7 +46,7 @@ r = await pub('/auth/reset', { token: 'x'.repeat(43), password: 'OutraSenha!123'
 r = await pub('/auth/reset', { token: linkB, password: 'curta' }); ok(r.s === 400 && /10 caracteres/.test(r.j.error), 'senha curta recusada');
 r = await pub('/auth/reset', { token: linkB, password: 'SenhaNova!12345' }); ok(r.j.ok, 'senha redefinida pelo link');
 r = await pub('/auth/reset', { token: linkB, password: 'MaisUma!12345' }); ok(r.s === 400, 'link funciona uma única vez');
-ok((await cli('/client/summary')).s === 401, 'sessões abertas caíram com a senha nova');
+ok((await cli('/bots/plan')).s === 401, 'sessões abertas caíram com a senha nova');
 r = await client()('/auth/login', { email: 'maria@bomgrao.com', password: 'SenhaAntiga!123' }); ok(r.s === 401, 'senha antiga não entra mais');
 const c2 = client();
 r = await c2('/auth/login', { email: 'maria@bomgrao.com', password: 'SenhaNova!12345' });

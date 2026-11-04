@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { sendAuthTemplate } from '../whatsapp/providers/metaCloud.js';
+
+/** Código por WhatsApp/SMS foi desativado: a plataforma usa só o app autenticador (TOTP), mais seguro. */
+async function sendAuthTemplate(_phone: string, _code: string): Promise<never> {
+  throw Object.assign(new Error('Envio de código por mensagem desativado: use o aplicativo autenticador'), { status: 409 });
+}
 
 const TTL_MIN = 5;
 const MAX_ATTEMPTS = 5;

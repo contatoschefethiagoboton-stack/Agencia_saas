@@ -1,5 +1,8 @@
 # Blueprint do Render: Dashboard → New → Blueprint → escolha este repositório.
 # Cria a API (Docker), o Redis (Key Value) e o Postgres, já ligados entre si.
+# REGIÃO: a Binance bloqueia servidores nos EUA (erro 451). Para robôs de cripto com dinheiro real, o serviço web
+# precisa estar em Frankfurt ou Singapura. A região só é escolhida na criação do serviço no Render (não dá para mudar depois):
+# se o seu está em Oregon/Ohio/Virginia, crie um serviço novo em Frankfurt. Gráficos e sinais funcionam em qualquer região.
 services:
   - type: web
     name: agencia-saas
@@ -26,22 +29,16 @@ services:
         generateValue: true
       - key: TOKEN_ENC_KEY
         generateValue: true
-      - key: ANTHROPIC_MODEL
-        value: claude-sonnet-5-5
-      - key: META_API_VERSION
-        value: v25.0
+      - key: APP_NAME               # nome no app autenticador, nos e-mails e no Telegram
+        value: Radar Invest
       - key: ASAAS_API_URL
         value: https://api.asaas.com/v3
-      - key: PLATFORM_PROFIT_SHARE_BPS
-        value: "6000"
-      - key: WITHDRAWAL_DAILY_CAP_CENTS
-        value: "2000000"
       # Preenchidos por você no painel do Render (sync: false = o Render pergunta na criação)
       - key: ADMIN_EMAIL          # cria o 1º administrador no deploy
         sync: false
       - key: ADMIN_PASSWORD       # mínimo 10 caracteres; troque depois do 1º login
         sync: false
-      - key: ADMIN_PATH           # endereço secreto do login da agência, ex.: /acesso-minha-agencia-7k2 (sem ele: /admin)
+      - key: ADMIN_PATH           # endereço secreto do login do administrador, ex.: /acesso-painel-7k2 (sem ele: /admin)
         sync: false
       # E-mail para "Esqueci minha senha" (qualquer SMTP: Gmail com senha de app, Zoho, Resend, SendGrid...)
       - key: SMTP_HOST
@@ -52,49 +49,23 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
-      - key: MAIL_FROM            # ex.: Agência Hub <nao-responda@suaagencia.com.br>
+      - key: MAIL_FROM            # ex.: Radar Invest <nao-responda@seudominio.com.br>
         sync: false
       - key: ASAAS_SPLIT_JSON     # split nativo: [{"walletId":"...","percentualValue":20}]
         sync: false
       - key: PUBLIC_URL
         sync: false
-      - key: ANTHROPIC_API_KEY
+      # ---- Dados de mercado (cripto da Binance é público e não precisa de chave)
+      - key: BRAPI_TOKEN            # B3 e FIIs: crie em brapi.dev (sem ele, só os ativos de teste da brapi)
         sync: false
-      - key: META_APP_ID
+      - key: ALPACA_DATA_KEY        # ações dos EUA: chave gratuita em alpaca.markets (feed IEX)
         sync: false
-      - key: META_APP_SECRET
+      - key: ALPACA_DATA_SECRET
         sync: false
-      - key: META_LOGIN_CONFIG_ID   # opcional: configuração do "Login do Facebook para Empresas"
+      # ---- Avisos no Telegram: crie o bot com o @BotFather
+      - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: WHATSAPP_VERIFY_TOKEN
-        sync: false
-      - key: WHATSAPP_SYSTEM_TOKEN
-        sync: false
-      - key: PLATFORM_WA_PHONE_ID
-        sync: false
-      - key: GOOGLE_CLIENT_ID       # Google Meu Negócio (ver docs/GOOGLE_SETUP.md)
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: IMAGE_API_KEY          # fotos por IA (API de imagens compatível com OpenAI)
-        sync: false
-      - key: TIKTOK_CLIENT_KEY      # TikTok (ver docs/TIKTOK_SETUP.md)
-        sync: false
-      - key: TIKTOK_CLIENT_SECRET
-        sync: false
-      - key: TIKTOK_VERIFY_FILENAME # arquivo de verificação de domínio pedido pelo TikTok
-        sync: false
-      - key: TIKTOK_VERIFY_CONTENT
-        sync: false
-      - key: TIKTOK_PRIVACY         # SELF_ONLY até a auditoria; depois PUBLIC_TO_EVERYONE
-        value: SELF_ONLY
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_BR_BUNDLE_SID
-        sync: false
-      - key: TWILIO_BR_ADDRESS_SID
+      - key: TELEGRAM_BOT_NAME      # nome do bot sem @ (aparece para o cliente em Avisos)
         sync: false
       - key: ASAAS_API_KEY
         sync: false
@@ -110,7 +81,7 @@ services:
     plan: free
     ipAllowList: []          # só acessível pela rede interna do Render
 
-  # Workers (fila do WhatsApp + IA). No plano free eles rodam dentro do serviço web.
+  # Workers (robôs + radar de lançamentos). No plano free eles rodam dentro do serviço web.
   # Para escalar, descomente e defina RUN_WORKERS_IN_WEB=0 no serviço web.
   # - type: worker
   #   name: agencia-workers
