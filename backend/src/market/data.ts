@@ -119,7 +119,7 @@ export async function getQuotes(market: Market, symbols: string[]): Promise<Quot
 
 /** Todas as moedas em USDT da Binance com preço e variação de 24h (cache 20s, chamada pesada). */
 async function cryptoTickers(): Promise<Quote[]> {
-  return cached('tickers:crypto', 20, async () => {
+  return cached('tickers:crypto', Number(process.env.MARKET_CACHE_SEC) || 20, async () => {
     const rows = await getJson(`${binance()}/api/v3/ticker/24hr?type=MINI`, undefined, 'Binance');
     return (rows as any[]).filter(t => t.symbol.endsWith('USDT') && +t.quoteVolume > 0)
       .map(t => ({ symbol: t.symbol, price: +t.lastPrice, changePct: +t.openPrice ? (+t.lastPrice / +t.openPrice - 1) * 100 : 0, volume: +t.quoteVolume }));

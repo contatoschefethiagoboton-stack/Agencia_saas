@@ -4,8 +4,8 @@ Legenda: ✅ pronto e testado · 🟡 pronto no código, depende de chave/config
 
 ## Acesso
 
-- **Clientes** entram pelo endereço principal. O **administrador** entra pelo endereço secreto definido em
-  Render → Environment → `ADMIN_PATH` (sem ele, `/admin`). O endereço aparece no log ao subir (`[config] Login do administrador: …`).
+- **Todos** entram pela mesma tela. O administrador vê a plataforma inteira e a área de Administração. O endereço secreto
+  antigo (`ADMIN_PATH`) continua funcionando.
 - Não existe senha padrão: você define `ADMIN_EMAIL` e `ADMIN_PASSWORD`. O 2FA é por **aplicativo autenticador**
   (QR Code no primeiro login). O código por WhatsApp foi desligado junto com a antiga agência.
 - Esqueceu a senha do administrador ou perdeu o celular: `ADMIN_PASSWORD` nova + `ADMIN_RESET=1` e deploy.
@@ -29,14 +29,18 @@ Legenda: ✅ pronto e testado · 🟡 pronto no código, depende de chave/config
 | Robôs com dinheiro real — B3 | ⛔ | corretoras brasileiras não liberam API de ordens para pessoa física |
 | Copy trade | ✅ | estratégias master da plataforma; cliente copia com valor, stop e corretora próprios |
 | Avisos (plataforma + Telegram) | 🟡 | Telegram precisa de `TELEGRAM_BOT_TOKEN` |
-| Planos, aprovação de cadastro, VIP, cobrança Asaas | ✅ / 🟡 | cobrança precisa de `ASAAS_API_KEY` |
+| Planos Básico/Médio/Top, pagamento PIX/cartão e liberação automática | 🟡 | `ASAAS_API_KEY` + webhook com `ASAAS_WEBHOOK_TOKEN` |
+| Carteira: depósito PIX, transferência entre clientes, saque | 🟡 | subcontas Asaas liberadas na conta principal |
+| Alertas de preço e robô Inteligente com stop móvel | ✅ | |
+| Rastreamento de acessos, bloqueio de IP, senha vazada, CPF | ✅ | |
 | Segurança: 2FA, auditoria, kill switch, modo pânico | ✅ | modo pânico congela todos os robôs |
 
 ## Próximos passos sugeridos
 
 1. **Regulatório:** registro na CVM ou parceria com analista/consultor credenciado antes de vender sinais e copy trade;
    termos de uso e política de privacidade revisados por advogado.
-2. **Região do servidor:** se for oferecer robôs de cripto com dinheiro real, crie o serviço do Render em Frankfurt.
+2. **Débito automático em conta:** o Asaas não oferece para assinatura recorrente; hoje são PIX e cartão.
+3. **Região do servidor:** se for oferecer robôs de cripto com dinheiro real, crie o serviço do Render em Frankfurt.
 3. **Mais corretoras de cripto** (Bybit, OKX, Mercado Bitcoin) seguindo o mesmo contrato de `backend/src/brokers/index.ts`.
 4. **B3 com ordens reais:** integração via MetaTrader 5 da corretora (exige um terminal rodando no Windows do cliente ou VPS).
 5. **Notícias e agenda de dividendos** no painel, e alertas de preço definidos pelo cliente.

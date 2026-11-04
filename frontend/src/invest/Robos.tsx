@@ -7,7 +7,7 @@ import { Spinner, useStrategies } from './parts';
 
 export interface Bot {
   id: string; name: string; market: Market; symbol: string; interval: Interval; strategy: string; mode: 'paper' | 'live'; amount: number;
-  stop_loss_pct: number | null; take_profit_pct: number | null; max_daily_loss: number | null; status: 'active' | 'paused' | 'error'; status_reason: string | null;
+  stop_loss_pct: number | null; take_profit_pct: number | null; max_daily_loss: number | null; trailing_stop_pct: number | null; status: 'active' | 'paused' | 'error'; status_reason: string | null;
   copy_of: string | null; copy_name: string | null; last_tick_at: string | null; pnl_total: number; pnl_today: number; trades: number; wins: number;
   open_trade: { qty: number; entry_price: number; entry_at: string; stop_price: number | null; target_price: number | null } | null;
 }
@@ -87,7 +87,7 @@ export default function Robos({ query }: { query: URLSearchParams }) {
                   {ot.stop_price && <> · stop {price(ot.stop_price, b.market)}</>}{ot.target_price && <> · alvo {price(ot.target_price, b.market)}</>}
                 </> : <span className="card-sub">Sem posição: {b.status === 'active' ? 'esperando o próximo sinal de compra' : 'robô parado'}.</span>}
               </div>
-              <div className="card-sub">Proteções: stop {b.stop_loss_pct ? `${b.stop_loss_pct}%` : 'pela volatilidade'} · alvo {b.take_profit_pct ? `${b.take_profit_pct}%` : 'pelo sinal de venda'}
+              <div className="card-sub">Proteções: {b.trailing_stop_pct ? `stop móvel ${b.trailing_stop_pct}% · ` : ''}stop {b.stop_loss_pct ? `${b.stop_loss_pct}%` : b.trailing_stop_pct ? 'móvel' : 'pela volatilidade'} · alvo {b.take_profit_pct ? `${b.take_profit_pct}%` : 'pelo sinal de venda'}
                 {' · '}perda máx./dia {b.max_daily_loss ? money(b.max_daily_loss, b.market) : 'sem limite'}{b.last_tick_at ? ` · conferido ${ago(b.last_tick_at)}` : ''}</div>
               <div className="actions">
                 {b.status === 'active'
@@ -138,7 +138,7 @@ function NovoRobo({ query, plan, onDone }: { query: URLSearchParams; plan: Plan;
   const [f, setF] = useState({
     name: query.get('name') ?? (query.get('symbol') ? `Robô ${query.get('symbol')}` : ''),
     market: (query.get('market') as Market) || 'crypto', symbol: query.get('symbol') ?? 'BTCUSDT',
-    interval: (query.get('interval') as Interval) || '1h', strategy: query.get('strategy') ?? 'score',
+    interval: (query.get('interval') as Interval) || '1h', strategy: query.get('strategy') ?? 'inteligente', trail: query.get('strategy') && query.get('strategy') !== 'inteligente' ? '' : '3',
     mode: 'paper' as 'paper' | 'live', connectionId: '', amount: '100', stop: query.get('stop') ?? '3', take: query.get('take') ?? '', maxLoss: '',
   });
   const [err, setErr] = useState('');
@@ -155,7 +155,7 @@ function NovoRobo({ query, plan, onDone }: { query: URLSearchParams; plan: Plan;
     setBusy(true);
     try {
       const body = { name: f.name, mode: f.mode, amount: n(f.amount), connectionId: f.mode === 'live' ? f.connectionId || null : null,
-                     stopLossPct: n(f.stop), takeProfitPct: n(f.take), maxDailyLoss: n(f.maxLoss),
+                     stopLossPct: n(f.stop), takeProfitPct: n(f.take), maxDailyLoss: n(f.maxLoss), trailingStopPct: n(f.trail),
                      ...(copyOf ? { copyOf } : { market: f.market, symbol: f.symbol, interval: f.interval, strategy: f.strategy }) };
       const r = await guard(() => api<{ id: string }>('/bots', { body }));
       await guard(() => api(`/bots/${r.id}`, { method: 'PATCH', body: { status: 'active' } }));
@@ -184,6 +184,7 @@ function NovoRobo({ query, plan, onDone }: { query: URLSearchParams; plan: Plan;
         <label className="field">Valor por operação<input required inputMode="decimal" value={f.amount} onChange={set('amount')} /><small>{f.market === 'crypto' ? 'em USDT' : f.market === 'us' ? 'em US$' : 'em R$'}</small></label>
         <label className="field">Stop (% de perda)<input inputMode="decimal" value={f.stop} onChange={set('stop')} placeholder="vazio = pela volatilidade" /></label>
         <label className="field">Alvo (% de ganho)<input inputMode="decimal" value={f.take} onChange={set('take')} placeholder="vazio = sai no sinal" /></label>
+        <label className="field">Stop móvel (%)<input inputMode="decimal" value={f.trail} onChange={set('trail')} placeholder="ex.: 3" /><small>Sobe junto com o preço; vende quando cair essa % do topo</small></label>
         <label className="field">Perda máxima por dia<input inputMode="decimal" value={f.maxLoss} onChange={set('maxLoss')} placeholder="ex.: 50" /><small>Atingiu: o robô pausa sozinho</small></label>
       </div>
       {f.mode === 'live' && <p className="msg warn" style={{ margin: 0 }}>Dinheiro real: a ordem é enviada à sua corretora com a sua chave. Ligar o robô pede o código do autenticador.</p>}

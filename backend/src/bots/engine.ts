@@ -22,6 +22,7 @@ export const PAPER_FEE = 0.001;   // 0,1% por ponta no simulado (taxa típica de
 export interface BotRow {
   id: string; tenant_id: string | null; name: string; market: Market; symbol: string; interval: Interval; strategy: string;
   mode: 'paper' | 'live'; amount: string; stop_loss_pct: string | null; take_profit_pct: string | null; max_daily_loss: string | null;
+  trailing_stop_pct: string | null;
   status: string; is_master: boolean; copy_of: string | null; last_signal_at: string | null; created_at: string;
   broker: BrokerId | null; key_cipher: Buffer | null; secret_cipher: Buffer | null; paper: boolean | null; live_trading: boolean | null;
 }
@@ -104,6 +105,14 @@ async function processBot(b: BotRow) {
 
 /** Stop e alvo, conferidos a cada volta. Devolve true se fechou. */
 async function checkExits(b: BotRow, t: TradeRow, price: number) {
+  // STOP MÓVEL: o stop sobe junto com o preço (nunca desce). Na virada para queda, o robô vende protegendo o ganho.
+  if (b.trailing_stop_pct) {
+    const trail = price * (1 - +b.trailing_stop_pct / 100);
+    if (!t.stop_price || trail > +t.stop_price) {
+      await withSystem(c => c.query(`UPDATE bot_trades SET stop_price = $2 WHERE id = $1 AND status = 'open'`, [t.id, trail]));
+      t.stop_price = String(trail);
+    }
+  }
   if (t.stop_price && price <= +t.stop_price) { await closePosition(b, t, price, 'stop'); return true; }
   if (t.target_price && price >= +t.target_price) { await closePosition(b, t, price, 'alvo'); return true; }
   return false;
@@ -128,7 +137,8 @@ async function openPosition(b: BotRow, price: number, atr: number | null, master
   else fill = { orderId: '', qty: amount / price, price, fee: amount * PAPER_FEE };
 
   const p = fill.price;
-  const stop = b.stop_loss_pct ? p * (1 - +b.stop_loss_pct / 100) : master?.stop_price ? +master.stop_price : atr ? p - 2 * atr : null;
+  const stop = b.trailing_stop_pct && !b.stop_loss_pct ? p * (1 - +b.trailing_stop_pct / 100)
+    : b.stop_loss_pct ? p * (1 - +b.stop_loss_pct / 100) : master?.stop_price ? +master.stop_price : atr ? p - 2 * atr : null;
   const target = b.take_profit_pct ? p * (1 + +b.take_profit_pct / 100) : master?.target_price ? +master.target_price : null;
   await withSystem(async c => {
     await c.query(`INSERT INTO bot_trades (bot_id, tenant_id, mode, symbol, qty, entry_price, entry_order, stop_price, target_price, fees)

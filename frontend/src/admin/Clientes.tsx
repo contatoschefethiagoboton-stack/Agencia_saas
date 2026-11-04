@@ -5,20 +5,23 @@ import { useStepUp } from '../auth/StepUp';
 
 interface Tenant { id: string; name: string; niche: string | null; city: string | null; plan: string; status: string;
   suspended_reason: string | null; owner_email: string | null; cobranca_ativa: boolean; robos_ativos: number; robos_reais: number;
-  corretoras: number; vip: boolean; vip_note: string | null; signup: 'admin' | 'self'; ultimo_acesso: string | null }
+  corretoras: number; document: string | null; billing_type: string | null; carteira: string | null; deleted_at: string | null; vip: boolean; vip_note: string | null; signup: 'admin' | 'self'; ultimo_acesso: string | null }
 interface Plan { id: string; name: string; price_cents: string }
 
 const statusBadge = (t: Tenant) => t.status === 'pending' ? <span className="badge warn">Aguardando sua aprovação</span>
+  : t.status === 'awaiting_payment' ? <span className="badge warn">Aguardando pagamento ({t.billing_type === 'CREDIT_CARD' ? 'cartão' : 'PIX'})</span>
+  : t.status === 'deleted' ? <span className="badge bad">Excluído</span>
   : t.status === 'rejected' ? <span className="badge bad">Cadastro recusado</span>
   : t.status === 'active' ? <span className="badge good">Ativo</span>
   : <span className="badge bad">{t.status === 'killed' ? 'Kill switch' : `Suspenso${t.suspended_reason ? ` · ${t.suspended_reason}` : ''}`}</span>;
 
 export default function Clientes() {
-  const { data: list, error, reload } = useLoad<Tenant[]>('/admin/tenants');
+  const [excluidos, setExcluidos] = useState(false);
+  const { data: list, error, reload } = useLoad<Tenant[]>(`/admin/tenants${excluidos ? '?excluidos=1' : ''}`);
   const { data: plans } = useLoad<Plan[]>('/admin/plans');
   const guard = useStepUp();
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string; secret?: string } | null>(null);
-  const [f, setF] = useState({ name: '', niche: '', city: '', document: '', plan: 'starter', ownerName: '', ownerEmail: '', ownerPhone: '', startBilling: false });
+  const [f, setF] = useState({ name: '', niche: '', city: '', document: '', plan: 'basico', ownerName: '', ownerEmail: '', ownerPhone: '', startBilling: false });
   const set = (k: keyof typeof f) => (e: any) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
 
   const act = async (fn: () => Promise<any>, ok: (r: any) => { text: string; secret?: string }) => {
@@ -54,7 +57,8 @@ export default function Clientes() {
       {msg && <div className={`msg ${msg.kind}`} role="status">{msg.text}{msg.secret && <p className="mono" style={{ fontSize: 18, margin: '8px 0 0' }}>{msg.secret}</p>}</div>}
 
       <section className="card">
-        <h2>Carteira de clientes</h2>
+        <div className="card-head"><h2>Clientes</h2>
+          <label className="check"><input type="checkbox" checked={excluidos} onChange={e => setExcluidos(e.target.checked)} /> Mostrar excluídos</label></div>
         {error && <p className="msg err">{error}</p>}
         {list && (list.length ? (
           <div className="table-wrap"><table className="tbl">
@@ -75,7 +79,7 @@ export default function Clientes() {
                   <div className="card-sub">{t.corretoras} corretora(s)</div></td>
                 <td className="mono">{t.owner_email}</td>
                 <td><div className="actions">
-                  {t.status === 'pending' && <>
+                  {['pending', 'awaiting_payment'].includes(t.status) && <>
                     <button className="btn btn-good" onClick={() => act(() => api(`/admin/tenants/${t.id}/approve`, { body: {} }), () => ({ text: `${t.name} aprovado: o cliente já pode entrar.` }))}>Aprovar acesso</button>
                     <button className="btn btn-danger" onClick={() => { const reason = prompt('Motivo da recusa (opcional, só você vê):') ?? undefined;
                       act(() => api(`/admin/tenants/${t.id}/reject`, { body: { reason } }), () => ({ text: `Cadastro de ${t.name} recusado.` })); }}>Recusar</button>
@@ -87,12 +91,16 @@ export default function Clientes() {
                             act(() => api(`/admin/tenants/${t.id}`, { method: 'PATCH', body: { vip: !t.vip, vipNote: note } }),
                                 () => ({ text: t.vip ? `${t.name} deixou de ser VIP.` : `${t.name} agora é VIP (o cliente não vê isso).` })); }}>
                     {t.vip ? 'Tirar VIP' : '★ Tornar VIP'}</button>
-                  {t.status !== 'pending' && t.status !== 'rejected' && <>
+                  {!['pending', 'rejected', 'awaiting_payment', 'deleted'].includes(t.status) && <>
                   {!t.cobranca_ativa && !t.vip && <button className="btn" onClick={() => act(() => api(`/admin/tenants/${t.id}/billing`, { body: {} }), () => ({ text: 'Assinatura criada no Asaas' }))}>Iniciar cobrança</button>}
                     {t.status === 'active' && <button className="btn btn-primary" onClick={() => openPanel(t)}>Abrir painel do cliente</button>}
                     {t.status === 'active'
                       ? <button className="btn btn-danger" onClick={() => kill(t)}>Bloquear conta</button>
                       : ['suspended', 'killed'].includes(t.status) && <button className="btn btn-good" onClick={() => act(() => api(`/admin/tenants/${t.id}/reactivate`, { body: {} }), () => ({ text: `${t.name} reativado` }))}>Reativar</button>}
+                    {t.status !== 'deleted' && <button className="btn btn-danger" onClick={() => {
+                      const confirmName = prompt(`EXCLUIR "${t.name}": apaga o login, robôs, corretoras e alertas e cancela a assinatura. O histórico fica na auditoria.\nDigite o nome do cliente para confirmar:`);
+                      if (confirmName) act(() => api(`/admin/tenants/${t.id}/delete`, { body: { confirmName } }), r => ({ text: `${t.name} excluído. Cobrança: ${r.cobranca}.` }));
+                    }}>Excluir</button>}
                     <button className="btn" onClick={() => confirm(`Gerar nova senha provisória e zerar o 2FA do responsável de "${t.name}"?`) &&
                       act(() => api(`/admin/tenants/${t.id}/reset-owner`, { body: {} }), r => ({ text: `Nova senha provisória de ${r.email}:`, secret: r.tempPassword }))}>Resetar acesso</button>
                     </>}

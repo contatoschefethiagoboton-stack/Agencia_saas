@@ -24,7 +24,8 @@ const env = {
   ADMIN_EMAIL: 'dono@agencia.com', ADMIN_PASSWORD: 'SenhaForte123', PUBLIC_URL: 'http://localhost:3997',
   BINANCE_DATA_URL: 'http://localhost:4555/binance', BINANCE_API_URL: 'http://localhost:4555/binance',
   BRAPI_URL: 'http://localhost:4555/brapi', BRAPI_TOKEN: 'brapi-e2e', TELEGRAM_BOT_TOKEN: 'tg-e2e', TELEGRAM_API_URL: 'http://localhost:4555/telegram',
-  BOT_TICK_MS: '700', MARKET_CACHE_SEC: '1', RADAR_INTERVAL_MS: '2000', MIGRATIONS_DIR: path.resolve(BACKEND, '../db/migrations'),
+  BOT_TICK_MS: '700', MARKET_CACHE_SEC: '1', PRICE_ALERT_MS: '700', WALLET_COOLDOWN_SEC: '6', SIGNUP_RATE_LIMIT: '50', IP_FAIL_LIMIT: '8',
+  ASAAS_API_URL: 'http://localhost:4555/asaas', ASAAS_API_KEY: 'asaas-master', ASAAS_WEBHOOK_TOKEN: 'whk-e2e', HIBP_URL: 'http://localhost:4555/hibp', RADAR_INTERVAL_MS: '2000', MIGRATIONS_DIR: path.resolve(BACKEND, '../db/migrations'),
   MAIL_OUTBOX_FILE: path.join(os.tmpdir(), 'agencia-e2e-emails.jsonl'),
   ADMIN_PATH: '/acesso-secreto-e2e', WEB_DIR: path.join(os.tmpdir(), 'agencia-e2e-web'),
 };

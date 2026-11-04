@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { withService } from '../db.js';
 import { verifyAsaas, verifyMercadoPago } from './verify.js';
-import { confirmPayment, ensurePayment, reversePayment } from './confirm.js';
+import { confirmPayment, ensurePayment, overduePayment, reversePayment } from './confirm.js';
 import { audit } from '../audit/audit.js';
 
 export const webhookRouter = Router();
@@ -17,12 +17,13 @@ export const webhookRouter = Router();
 const PAID = ['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'];
 const CHARGEBACK = ['PAYMENT_CHARGEBACK_REQUESTED', 'PAYMENT_CHARGEBACK_DISPUTE', 'PAYMENT_AWAITING_CHARGEBACK_REVERSAL'];
 const REFUND = ['PAYMENT_REFUNDED'];
+const OVERDUE = ['PAYMENT_OVERDUE'];
 
 webhookRouter.post('/asaas', async (req, res) => {
   if (!verifyAsaas(req)) { await audit({ ip: req.ip, action: 'webhook.rejected', target: 'asaas' }); return res.status(401).end(); }
   const { id: eventId, event, payment } = req.body ?? {};
   if (!eventId || !payment?.id) return res.status(400).end();
-  if (![...PAID, ...CHARGEBACK, ...REFUND].includes(event)) return res.sendStatus(200);
+  if (![...PAID, ...CHARGEBACK, ...REFUND, ...OVERDUE].includes(event)) return res.sendStatus(200);
 
   const r = await fetch(`${process.env.ASAAS_API_URL}/payments/${encodeURIComponent(payment.id)}`,
                         { headers: { access_token: process.env.ASAAS_API_KEY! } });
@@ -34,9 +35,11 @@ webhookRouter.post('/asaas', async (req, res) => {
     await withService(c => reversePayment(c, 'asaas', String(eventId), real.id, 'chargeback', req.ip));
   } else if (REFUND.includes(event) && real.status === 'REFUNDED') {
     await withService(c => reversePayment(c, 'asaas', String(eventId), real.id, 'refunded', req.ip));
+  } else if (OVERDUE.includes(event) && real.status === 'OVERDUE') {
+    await withService(c => overduePayment(c, 'asaas', String(eventId), real.subscription, req.ip));
   } else if (PAID.includes(event) && ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'].includes(real.status)) {
     await withService(async c => {
-      await ensurePayment(c, 'asaas', real.id, real.externalReference, cents);
+      await ensurePayment(c, 'asaas', real.id, real.externalReference, cents, real.subscription);
       await confirmPayment(c, 'asaas', String(eventId), real.id, cents, req.ip);
     });
   }

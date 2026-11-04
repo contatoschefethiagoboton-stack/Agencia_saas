@@ -6,7 +6,8 @@ import { z } from 'zod';
 import { appPool, adminPool } from '../db.js';
 import { issueOtp, verifyOtp } from './otp.js';
 import { deviceHash, setSession, clearSession, readSession } from './session.js';
-import { newTotpSecret, otpauthUrl, totpStep } from './totp.js';
+import { newTotpSecret, otpauthUrl } from './totp.js';
+import { totpOnce } from './mfa.js';
 import { encryptToken, decryptToken } from '../security/vault.js';
 import { audit } from '../audit/audit.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
@@ -17,15 +18,11 @@ import crypto from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { mailReady, sendMail } from '../mail.js';
 import { publicUrl, adminPath } from '../config.js';
+import { isCpf, pwnedPassword, PWNED_MSG, registerLoginFailure } from '../security/guard.js';
+import { billingReady, createSubscription, pendingPayUrl } from '../finance/billing.js';
 
 export const authRouter = Router();
 const DUMMY_HASH = await argon2.hash('senha-que-nao-existe');
-/** Código do autenticador vale UMA vez: reusar o mesmo código (ex.: capturado por phishing) é recusado. */
-async function totpOnce(userId: string, secret: string, code: string) {
-  const step = totpStep(secret, code);
-  if (step === null) return false;
-  return (await redis.set(`totp:used:${userId}:${step}`, '1', { NX: true, EX: 120 })) === 'OK';
-}
 const whatsappOtpReady = () => false;   // 2FA só por aplicativo autenticador
 
 /*
@@ -64,20 +61,23 @@ authRouter.post('/login', loginLimiter, async (req, res) => {
          WHERE id = $1`, [u.id]);
       await audit({ actorId: u?.id, tenantId: u?.tenant_id, ip: req.ip, action: 'auth.login_failed',
                     meta: { email: body.data.email.toLowerCase(), locked: Boolean(u?.locked) } }, c);
+      if (await registerLoginFailure(req.ip))     // muitas senhas erradas do mesmo IP em contas diferentes
+        await audit({ ip: req.ip, action: 'security.ip_blocked', meta: { motivo: 'tentativas de senha' } }, c);
       return res.status(401).json({ error: 'E-mail ou senha incorretos' });   // mensagem genérica
     }
 
-    // LOGINS SEPARADOS: administrador só entra por /admin; cliente só pela tela principal.
-    // Na porta errada a resposta é a mesma de senha errada (não revela que a conta existe nem que é admin).
-    if ((u.role === 'platform_admin') !== (body.data.area === 'admin')) {
-      await audit({ actorId: u.id, tenantId: u.tenant_id, ip: req.ip, action: 'auth.wrong_area', meta: { area: body.data.area } }, c);
-      return res.status(401).json({ error: 'E-mail ou senha incorretos' });
-    }
+    // ACESSO UNIFICADO: administrador e clientes entram pela mesma tela (o endereço secreto continua funcionando).
 
     // cadastro feito pelo próprio cliente só entra depois que a agência aprova
     if (u.tenant_id) {
       const st = (await c.query(`SELECT status FROM tenants WHERE id = $1`, [u.tenant_id])).rows[0]?.status;
       if (st === 'pending') return res.status(403).json({ error: 'Seu cadastro está aguardando a aprovação da plataforma. Você recebe um aviso quando for liberado.' });
+      if (st === 'deleted') return res.status(401).json({ error: 'E-mail ou senha incorretos' });
+      if (st === 'awaiting_payment') {
+        const t = (await c.query(`SELECT asaas_subscription_id, pay_url FROM tenants WHERE id = $1`, [u.tenant_id])).rows[0];
+        const payUrl = (t?.asaas_subscription_id && await pendingPayUrl(t.asaas_subscription_id).catch(() => null)) || t?.pay_url;
+        return res.status(402).json({ error: 'Falta só o pagamento do plano. Assim que o banco confirmar, seu acesso é liberado na hora.', payUrl });
+      }
       if (st === 'rejected') return res.status(403).json({ error: 'Seu cadastro não foi aprovado. Fale com o suporte.' });
     }
     if (u.totp_enabled) return res.json({ ticket: signTicket({ sub: u.id, method: 'totp' }), method: 'totp' });
@@ -127,12 +127,21 @@ authRouter.post('/login/verify', loginLimiter, async (req, res) => {
        ON CONFLICT DO NOTHING RETURNING device_hash`, [u.id, dh]);
     if (ins.rowCount) await audit({ actorId: u.id, tenantId: u.tenant_id, ip: req.ip,
                                     action: 'auth.new_device', meta: { ua: req.get('user-agent') } }, c);
+    if (u.role === 'platform_admin' && !u.tenant_id) u.tenant_id = await ensureAdminTenant(c, u.id);
     if (t.method === 'totp_setup') await audit({ actorId: u.id, tenantId: u.tenant_id, ip: req.ip, action: 'auth.totp_enabled' }, c);
     await audit({ actorId: u.id, tenantId: u.tenant_id, ip: req.ip, action: 'auth.login_ok' }, c);
     await c.query('COMMIT');
 
     setSession(res, { sub: u.id, tid: u.tenant_id, role: u.role, tv: u.token_version,
                       mfaAt: Math.floor(Date.now() / 1000) });
+    if (ins.rowCount && mailReady()) {              // aviso de acesso por aparelho novo (pega roubo de senha cedo)
+      const m = (await appPool.query(`SELECT email, name FROM users WHERE id = $1`, [u.id])).rows[0];
+      const quando = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+      void sendMail(m.email, 'Novo acesso à sua conta',
+        `Sua conta foi acessada de um aparelho novo em ${quando} (IP ${req.ip}).\nSe não foi você, troque a senha agora e fale com o suporte.`,
+        `<p>Sua conta foi acessada de um <b>aparelho novo</b> em ${quando} (IP ${req.ip}).</p><p>Se não foi você, troque a senha agora e fale com o suporte.</p>`)
+        .catch(e => console.error('[e-mail]', (e as Error).message));
+    }
     res.json({ ok: true, newDevice: Boolean(ins.rowCount), mustChangePassword: u.must_change_password });
   } catch (e) { await c.query('ROLLBACK'); throw e; }
   finally { c.release(); }
@@ -150,7 +159,7 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   const s = req.user!;
   const { rows } = await adminPool.query(
     `SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.must_change_password,
-            t.id AS tenant_id, t.name AS tenant_name, t.city, t.niche, t.plan, t.status AS tenant_status
+            t.id AS tenant_id, t.name AS tenant_name, t.city, t.niche, t.plan, t.status AS tenant_status, t.is_platform
        FROM users u LEFT JOIN tenants t ON t.id = coalesce($2::uuid, u.tenant_id) WHERE u.id = $1`,
     [s.sub, s.imp ? s.tid : null]);
   res.json({ ...rows[0], ...(s.imp ? { role: 'owner', impersonating: true } : {}),
@@ -165,7 +174,10 @@ authRouter.post('/impersonate/stop', requireAuth, async (req, res) => {
   const u = (await adminPool.query(`SELECT role FROM users WHERE id = $1`, [s.sub])).rows[0];
   if (u?.role !== 'platform_admin') return res.status(403).end();
   await audit({ actorId: s.sub, tenantId: s.tid, ip: req.ip, action: 'support.panel_closed' });
-  setSession(res, { sub: s.sub, tid: null, role: 'platform_admin', tv: s.tv, mfaAt: s.mfaAt });
+  const own = await appPool.connect();
+  let tid: string;
+  try { tid = await ensureAdminTenant(own, s.sub); } finally { own.release(); }
+  setSession(res, { sub: s.sub, tid, role: 'platform_admin', tv: s.tv, mfaAt: s.mfaAt });
   res.json({ ok: true });
 });
 
@@ -173,6 +185,7 @@ authRouter.post('/password', requireAuth, async (req, res) => {
   const b = z.object({ current: z.string(), next: z.string().min(10).max(200) }).parse(req.body);
   const u = (await appPool.query(`SELECT password_hash FROM users WHERE id = $1`, [req.user!.sub])).rows[0];
   if (!u || !(await argon2.verify(u.password_hash, b.current))) return res.status(401).json({ error: 'Senha atual incorreta' });
+  if (await pwnedPassword(b.next)) return res.status(400).json({ error: PWNED_MSG });
   // trocar a senha derruba as outras sessões (token_version + 1) e renova a desta
   const { rows } = await appPool.query(
     `UPDATE users SET password_hash = $2, must_change_password = false, token_version = token_version + 1
@@ -256,6 +269,7 @@ authRouter.post('/forgot', loginLimiter, async (req, res) => {
 authRouter.post('/reset', loginLimiter, async (req, res) => {
   const b = z.object({ token: z.string().min(20).max(100), password: z.string().min(10).max(200) }).safeParse(req.body);
   if (!b.success) return res.status(400).json({ error: 'A senha precisa ter pelo menos 10 caracteres' });
+  if (await pwnedPassword(b.data.password)) return res.status(400).json({ error: PWNED_MSG });
   const c = await appPool.connect();
   try {
     await c.query('BEGIN');
@@ -276,42 +290,88 @@ authRouter.post('/reset', loginLimiter, async (req, res) => {
 });
 
 // ---------- Criar conta (o cliente se cadastra; a agência aprova) ----------
-const signupLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 5, standardHeaders: 'draft-7', legacyHeaders: false,
+const signupLimiter = rateLimit({ windowMs: 60 * 60_000, limit: Number(process.env.SIGNUP_RATE_LIMIT ?? 5), standardHeaders: 'draft-7', legacyHeaders: false,
                                   message: { error: 'Muitos cadastros deste endereço. Tente mais tarde.' } });
 
+/** Planos à venda (tela de cadastro, sem login). */
+authRouter.get('/plans', async (_req, res) => {
+  res.json((await appPool.query(`SELECT id, name, price_cents::int, description, max_bots, live_trading, copy_trade, telegram, price_alerts
+                                   FROM plans WHERE active ORDER BY price_cents`)).rows);
+});
+
+/*
+ * CADASTRO COM PLANO: o investidor escolhe o plano e a forma de pagamento (PIX ou cartão).
+ * A conta nasce "aguardando pagamento" e é liberada SOZINHA quando o Asaas confirma o pagamento (webhook
+ * reconsultado no gateway). Dados do cartão nunca passam pelo nosso servidor: o pagamento é na página do Asaas.
+ * Sem Asaas configurado, o cadastro fica aguardando aprovação manual do administrador.
+ */
 authRouter.post('/signup', signupLimiter, async (req, res) => {
   const b = z.object({
-    business: z.string().trim().min(2).max(120), niche: z.string().trim().max(60).optional(), city: z.string().trim().max(80).optional(),
-    name: z.string().trim().min(2).max(120), email: z.string().email().max(200), phone: z.string().regex(/^\+?\d{10,15}$/).optional(),
-    password: z.string().min(10).max(200),
+    name: z.string().trim().min(5).max(120), email: z.string().email().max(200), phone: z.string().regex(/^\+?\d{10,15}$/).optional(),
+    document: z.string().trim().min(11).max(18), password: z.string().min(10).max(200),
+    plan: z.string().max(20).default('basico'), billingType: z.enum(['PIX', 'CREDIT_CARD']).default('PIX'),
+    website: z.string().max(0).optional(),                       // armadilha para robôs (campo invisível)
   }).safeParse(req.body);
-  if (!b.success) return res.status(400).json({ error: 'Confira os dados: e-mail válido e senha com pelo menos 10 caracteres' });
-  const d = b.data, email = d.email.toLowerCase();
+  if (!b.success) {
+    if (req.body?.website) { await audit({ ip: req.ip, action: 'security.signup_bot' }); return res.status(201).json({ ok: true, message: 'Cadastro recebido.' }); }
+    return res.status(400).json({ error: 'Confira os dados: nome completo, e-mail válido, CPF e senha com pelo menos 10 caracteres' });
+  }
+  const d = b.data, email = d.email.toLowerCase(), cpf = d.document.replace(/\D/g, '');
+  if (!isCpf(cpf)) return res.status(400).json({ error: 'CPF inválido' });
+  if (await pwnedPassword(d.password)) return res.status(400).json({ error: PWNED_MSG });
   const hash = await argon2.hash(d.password, { type: argon2.argon2id });
+  const paid = billingReady();
   const c = await appPool.connect();
   try {
     await c.query('BEGIN');
+    if (!(await c.query(`SELECT 1 FROM plans WHERE id = $1 AND active`, [d.plan])).rowCount) {
+      await c.query('ROLLBACK'); return res.status(400).json({ error: 'Plano inexistente' });
+    }
     if ((await c.query(`SELECT 1 FROM users WHERE email = $1`, [email])).rowCount) {
       await c.query('ROLLBACK');
       return res.status(409).json({ error: 'Este e-mail já tem cadastro. Use "Entrar" ou "Esqueci minha senha".' });
     }
-    const slug = `${d.business.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'cliente'}-${crypto.randomBytes(2).toString('hex')}`;
-    const t = (await c.query(`INSERT INTO tenants (name, slug, niche, city, status, signup) VALUES ($1, $2, $3, $4, 'pending', 'self') RETURNING id`,
-                             [d.business, slug, d.niche ?? null, d.city ?? null])).rows[0];
+    if ((await c.query(`SELECT 1 FROM tenants WHERE regexp_replace(document, '\D', '', 'g') = $1 AND status <> 'deleted'`, [cpf])).rowCount) {
+      await c.query('ROLLBACK');
+      await audit({ ip: req.ip, action: 'security.signup_duplicate_cpf', meta: { email } });
+      return res.status(409).json({ error: 'Já existe uma conta com este CPF. Use "Entrar" ou fale com o suporte.' });
+    }
+    const slug = `${d.name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'cliente'}-${crypto.randomBytes(2).toString('hex')}`;
+    const t = (await c.query(`INSERT INTO tenants (name, slug, status, signup, plan, document, billing_type) VALUES ($1, $2, $3, 'self', $4, $5, $6) RETURNING id`,
+                             [d.name, slug, paid ? 'awaiting_payment' : 'pending', d.plan, cpf, d.billingType])).rows[0];
     const phone = d.phone ? (d.phone.startsWith('+') ? d.phone : `+${d.phone.length <= 11 ? '55' : ''}${d.phone}`) : null;
     await c.query(`INSERT INTO users (tenant_id, email, password_hash, phone_e164, role, name) VALUES ($1, $2, $3, $4, 'owner', $5)`,
                   [t.id, email, hash, phone, d.name]);
-    await audit({ tenantId: t.id, ip: req.ip, action: 'tenant.signup', meta: { email } }, c);
+    let payUrl: string | null = null;
+    if (paid) {
+      const sub = await createSubscription(c, t.id, email);
+      payUrl = await pendingPayUrl(sub);
+      await c.query(`UPDATE tenants SET pay_url = $2 WHERE id = $1`, [t.id, payUrl]);
+    }
+    await audit({ tenantId: t.id, ip: req.ip, action: 'tenant.signup', meta: { email, plan: d.plan, billingType: d.billingType } }, c);
     await c.query('COMMIT');
-    // avisa a agência por e-mail (se configurado)
-    if (mailReady()) {
+    if (!paid && mailReady()) {
       const admins = (await adminPool.query(`SELECT email FROM users WHERE role = 'platform_admin'`)).rows;
-      for (const a of admins) void sendMail(a.email, `Novo cadastro aguardando aprovação: ${d.business}`,
-        `${d.name} (${email}) cadastrou "${d.business}". Aprove ou recuse em ${publicUrl()}${adminPath()}#master-clientes`,
-        `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}${adminPath()}#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
+      for (const a of admins) void sendMail(a.email, `Novo cadastro aguardando aprovação: ${d.name}`,
+        `${d.name} (${email}) se cadastrou. Aprove ou recuse em ${publicUrl()}#master-clientes`,
+        `<p><b>${d.name}</b> (${email}) se cadastrou.</p><p><a href="${publicUrl()}#master-clientes">Aprovar ou recusar</a></p>`)
         .catch(e => console.error('[e-mail]', (e as Error).message));
     }
-    res.status(201).json({ ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a plataforma aprovar.' });
+    res.status(201).json(paid
+      ? { ok: true, payUrl, message: 'Cadastro criado! Pague o plano (PIX ou cartão) e o acesso é liberado assim que o banco confirmar.' }
+      : { ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a plataforma aprovar.' });
   } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
   finally { c.release(); }
 });
+
+/** Conta de investimentos do administrador (VIP, plano Top): ele usa a plataforma inteira com o mesmo login. */
+export async function ensureAdminTenant(c: import('pg').PoolClient, userId: string): Promise<string> {
+  const cur = (await c.query(`SELECT tenant_id FROM users WHERE id = $1 AND role = 'platform_admin'`, [userId])).rows[0];
+  if (!cur) throw Object.assign(new Error('Acesso negado'), { status: 403 });
+  if (cur.tenant_id) return cur.tenant_id;
+  const t = (await c.query(`INSERT INTO tenants (name, slug, status, plan, vip, vip_note, is_platform)
+                            VALUES ('Administração', $1, 'active', 'top', true, 'Conta do administrador', true) RETURNING id`,
+                           [`plataforma-${crypto.randomBytes(3).toString('hex')}`])).rows[0];
+  await c.query(`UPDATE users SET tenant_id = $2 WHERE id = $1`, [userId, t.id]);
+  return t.id;
+}

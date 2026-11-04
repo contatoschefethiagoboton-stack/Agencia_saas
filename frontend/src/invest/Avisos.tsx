@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useLoad } from '../ui/useLoad';
-import { ago, chartLink, type Market } from './format';
+import { ago, chartLink, MARKET_LABEL, price, symbolLabel, type Market } from './format';
 import { Spinner } from './parts';
 
 interface Alert { id: number; kind: 'sinal' | 'robo' | 'lancamento' | 'sistema'; title: string; body: string | null; market: Market | null; symbol: string | null; created_at: string; unread: boolean }
@@ -29,6 +29,7 @@ export default function Avisos({ onRead }: { onRead: () => void }) {
   return (
     <>
       <div className="page-head"><div><span className="eyebrow">Não perca a hora</span><h1>Avisos</h1></div></div>
+      <AlertasPreco />
       <div className="row">
         <div className="card wide">
           <h2>Últimos avisos</h2>
@@ -58,5 +59,54 @@ export default function Avisos({ onRead }: { onRead: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+interface PA { id: string; market: Market; symbol: string; kind: 'above' | 'below' | 'up_pct' | 'down_pct'; value: number; base_price: number; note: string | null;
+               active: boolean; triggered_at: string | null; triggered_price: number | null }
+const KINDS: Record<PA['kind'], string> = { above: 'Subir acima de', below: 'Cair abaixo de', up_pct: 'Subir (%)', down_pct: 'Cair (%)' };
+
+/** Alertas de preço: avisam uma vez quando o preço chega no valor escolhido. Conferidos a cada 20 segundos. */
+export function AlertasPreco({ preset }: { preset?: { market: Market; symbol: string } }) {
+  const { data, reload } = useLoad<PA[]>('/market/price-alerts');
+  const { data: plan } = useLoad<{ priceAlerts: number }>('/bots/plan');
+  const [f, setF] = useState({ market: preset?.market ?? 'crypto' as Market, symbol: preset?.symbol ?? 'BTCUSDT', kind: 'above' as PA['kind'], value: '', note: '' });
+  const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
+  const ativos = data?.filter(a => a.active).length ?? 0;
+  async function criar(e: React.FormEvent) {
+    e.preventDefault(); setMsg({});
+    try {
+      const r = await api('/market/price-alerts', { body: { ...f, value: Number(f.value.replace(/\./g, '').replace(',', '.')), note: f.note || undefined } });
+      setMsg({ ok: `Alerta criado. Preço agora: ${price(r.basePrice, f.market)}.` }); setF({ ...f, value: '', note: '' }); reload();
+    } catch (x) { setMsg({ err: (x as Error).message }); }
+  }
+  return (
+    <div className="card">
+      <div className="card-head"><h2>Alertas de preço</h2>
+        <span className="card-sub">{ativos} ativo(s){plan ? ` · seu plano: ${plan.priceAlerts < 0 ? 'ilimitados' : plan.priceAlerts}` : ''}</span></div>
+      <form className="form-grid" onSubmit={criar}>
+        {!preset && <>
+          <label className="field">Mercado<select value={f.market} onChange={e => setF({ ...f, market: e.target.value as Market })}><option value="crypto">Cripto</option><option value="b3">B3</option><option value="us">EUA</option></select></label>
+          <label className="field">Ativo<input required value={f.symbol} onChange={e => setF({ ...f, symbol: e.target.value.toUpperCase() })} /></label>
+        </>}
+        <label className="field">Avisar quando<select value={f.kind} onChange={e => setF({ ...f, kind: e.target.value as PA['kind'] })}>
+          {Object.entries(KINDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+        <label className="field">{f.kind.endsWith('pct') ? 'Percentual' : 'Preço'}<input required inputMode="decimal" value={f.value} onChange={e => setF({ ...f, value: e.target.value })} /></label>
+        <label className="field">Anotação (opcional)<input maxLength={120} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} placeholder="ex.: hora de vender metade" /></label>
+        <div className="actions" style={{ alignSelf: 'end' }}><button className="btn btn-primary">Criar alerta</button></div>
+      </form>
+      {msg.err && <p className="msg err">{msg.err}</p>}{msg.ok && <p className="msg ok">{msg.ok}</p>}
+      {!!data?.length && !preset && (
+        <div className="table-wrap"><table className="tbl">
+          <thead><tr><th>Ativo</th><th>Condição</th><th className="n">Preço na criação</th><th>Situação</th><th /></tr></thead>
+          <tbody>{data.map(a => (
+            <tr key={a.id}>
+              <td><a href={chartLink(a.market, a.symbol)}>{symbolLabel(a.symbol, a.market)}</a> <span className="card-sub">{MARKET_LABEL[a.market]}</span>{a.note && <div className="card-sub">{a.note}</div>}</td>
+              <td>{KINDS[a.kind]} {a.kind.endsWith('pct') ? `${a.value}%` : price(a.value, a.market)}</td>
+              <td className="n">{price(a.base_price, a.market)}</td>
+              <td>{a.active ? <span className="badge warn">Aguardando</span> : <span className="badge good">Disparou {a.triggered_at ? ago(a.triggered_at) : ''} a {price(a.triggered_price, a.market)}</span>}</td>
+              <td className="n"><button className="link-btn" onClick={async () => { await api(`/market/price-alerts/${a.id}`, { method: 'DELETE' }); reload(); }}>Apagar</button></td>
+            </tr>))}</tbody></table></div>)}
+    </div>
   );
 }

@@ -11,16 +11,20 @@ import { assertNotPanicking } from '../security/panic.js';
  */
 export const billingReady = () => Boolean(process.env.ASAAS_API_KEY && process.env.ASAAS_API_URL);
 
-async function asaas(path: string, body?: unknown) {
-  await assertNotPanicking();
+/** Chamada ao Asaas. Sem apiKey usa a conta principal da plataforma; com apiKey, a subconta do cliente (carteira). */
+export async function asaas(path: string, body?: unknown, opts: { method?: string; apiKey?: string; panicOk?: boolean } = {}) {
+  if (!opts.panicOk) await assertNotPanicking();
   if (!billingReady()) throw Object.assign(new Error('Gateway de pagamento não configurado (ASAAS_API_KEY)'), { status: 503 });
-  const r = await fetch(`${process.env.ASAAS_API_URL}${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { access_token: process.env.ASAAS_API_KEY!, 'Content-Type': 'application/json', 'User-Agent': 'agencia-hub' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let r: Response;
+  try {
+    r = await fetch(`${process.env.ASAAS_API_URL}${path}`, {
+      method: opts.method ?? (body ? 'POST' : 'GET'), signal: AbortSignal.timeout(20_000),
+      headers: { access_token: opts.apiKey ?? process.env.ASAAS_API_KEY!, 'Content-Type': 'application/json', 'User-Agent': 'radar-invest' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch { throw Object.assign(new Error('Asaas fora do ar. Tente de novo em instantes.'), { status: 502 }); }
   const json: any = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(`Asaas: ${json?.errors?.[0]?.description ?? r.status}`), { status: 502 });
+  if (!r.ok) throw Object.assign(new Error(`Asaas: ${json?.errors?.[0]?.description ?? r.status}`), { status: r.status >= 500 ? 502 : 400 });
   return json;
 }
 
@@ -46,8 +50,9 @@ export async function createSubscription(c: PoolClient, tenantId: string, ownerE
   const p = (await c.query(`SELECT p.id, p.name, p.price_cents, t.asaas_subscription_id FROM tenants t
                             JOIN plans p ON p.id = t.plan WHERE t.id = $1`, [tenantId])).rows[0];
   if (p.asaas_subscription_id) return p.asaas_subscription_id as string;
+  const bt = (await c.query(`SELECT billing_type FROM tenants WHERE id = $1`, [tenantId])).rows[0]?.billing_type;
   const sub = await asaas('/subscriptions', {
-    customer, billingType: 'UNDEFINED', cycle: 'MONTHLY', nextDueDate: today(1),
+    customer, billingType: bt ?? 'UNDEFINED', cycle: 'MONTHLY', nextDueDate: today(0),
     value: Number(p.price_cents) / 100, description: `Plano ${p.name}`,
     externalReference: `${tenantId}|subscription`, split: split(),
   });
@@ -67,4 +72,24 @@ export async function createCharge(c: PoolClient, tenantId: string, kind: 'setup
   await c.query(`INSERT INTO payments (tenant_id, gateway, gateway_payment_id, kind, amount_cents)
                  VALUES ($1, 'asaas', $2, $3, $4)`, [tenantId, pay.id, kind, cents.toString()]);
   return { id: pay.id as string, invoiceUrl: pay.invoiceUrl as string };
+}
+
+/** Link da cobrança em aberto da assinatura (página do Asaas com QR Code PIX ou formulário do cartão). */
+export async function pendingPayUrl(subscriptionId: string): Promise<string | null> {
+  const list = await asaas(`/subscriptions/${encodeURIComponent(subscriptionId)}/payments?status=PENDING`, undefined, { panicOk: true });
+  const overdue = list?.data?.length ? null : await asaas(`/subscriptions/${encodeURIComponent(subscriptionId)}/payments?status=OVERDUE`, undefined, { panicOk: true });
+  return (list?.data?.[0] ?? overdue?.data?.[0])?.invoiceUrl ?? null;
+}
+
+/** Troca de plano: novo valor vale também para a cobrança em aberto. */
+export async function changeSubscriptionPlan(subscriptionId: string, planName: string, cents: number) {
+  await asaas(`/subscriptions/${encodeURIComponent(subscriptionId)}`, { value: cents / 100, description: `Plano ${planName}`, updatePendingPayments: true });
+}
+
+export async function changeSubscriptionBillingType(subscriptionId: string, billingType: 'PIX' | 'CREDIT_CARD') {
+  await asaas(`/subscriptions/${encodeURIComponent(subscriptionId)}`, { billingType, updatePendingPayments: true });
+}
+
+export async function cancelSubscription(subscriptionId: string) {
+  await asaas(`/subscriptions/${encodeURIComponent(subscriptionId)}`, undefined, { method: 'DELETE', panicOk: true });
 }

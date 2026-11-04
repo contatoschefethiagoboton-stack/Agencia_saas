@@ -3,7 +3,7 @@ import { redis } from '../redis.js';
 import { notify } from '../notify.js';
 import { isPanicking } from '../security/panic.js';
 import { analyze, type Analysis } from './strategies.js';
-import { getCandles, listAllSymbols, topAssets, type Interval, type Market } from './data.js';
+import { getCandles, getQuotes, listAllSymbols, topAssets, type Interval, type Market } from './data.js';
 
 /*
  * RADAR (a cada RADAR_INTERVAL_MS, padrão 5 min)
@@ -41,6 +41,7 @@ export async function runRadar() {
     if (!(await isPanicking()) && (await redis.set('radar:lock', '1', { NX: true, EX: Math.max(1, Math.ceil(every / 1000) - 5) })) === 'OK') {
       for (const m of ['crypto', 'b3'] as Market[]) await listings(m).catch(e => console.error(`[radar ${m}]`, (e as Error).message));
       await watchSignals().catch(e => console.error('[radar sinais]', (e as Error).message));
+      await withSystem(c => c.query(`DELETE FROM access_log WHERE at < now() - interval '180 days'`)).catch(() => {});   // retenção do rastreamento
     }
     await new Promise(r => setTimeout(r, every));
   }
@@ -80,5 +81,47 @@ async function watchSignals() {
             `Placar ${an.score} · preço ${an.price}.${hr} Sinal técnico, não é garantia de resultado.`, w.market, w.symbol);
       }
     } catch { /* ativo sem dados agora: tenta na próxima volta */ }
+  }
+}
+
+/** Alertas de preço: confere a cada PRICE_ALERT_MS (padrão 20 s) e dispara uma única vez. */
+export async function runPriceAlerts() {
+  const every = Number(process.env.PRICE_ALERT_MS ?? 20_000);
+  for (;;) {
+    if ((await redis.set('pricealerts:lock', '1', { NX: true, EX: Math.max(5, Math.ceil(every / 1000)) })) === 'OK') {
+      await checkPriceAlerts().catch(e => console.error('[alertas de preço]', (e as Error).message));
+      await redis.del('pricealerts:lock');
+    }
+    await new Promise(r => setTimeout(r, every));
+  }
+}
+
+const KIND_TXT: Record<string, string> = { above: 'subiu acima de', below: 'caiu abaixo de', up_pct: 'subiu', down_pct: 'caiu' };
+
+async function checkPriceAlerts() {
+  const alerts = await withSystem(async c => (await c.query(
+    `SELECT a.id, a.tenant_id, a.market, a.symbol, a.kind, a.value::float, a.base_price::float, a.note
+       FROM price_alerts a JOIN tenants t ON t.id = a.tenant_id WHERE a.active AND t.status = 'active' LIMIT 2000`)).rows);
+  const byMarket = new Map<Market, Set<string>>();
+  for (const a of alerts) (byMarket.get(a.market) ?? byMarket.set(a.market, new Set()).get(a.market)!).add(a.symbol);
+  const prices = new Map<string, number>();
+  for (const [m, syms] of byMarket) {
+    const qs = await getQuotes(m, [...syms]).catch(() => []);
+    for (const q of qs) prices.set(`${m}:${q.symbol}`, q.price);
+    for (const s of syms) if (!prices.has(`${m}:${s}`))          // fora da lista de cotações: último candle
+      try { prices.set(`${m}:${s}`, (await getCandles(m, s, '5m', 50)).at(-1)!.close); } catch { /* sem dado agora */ }
+  }
+  for (const a of alerts) {
+    const p = prices.get(`${a.market}:${a.symbol}`);
+    if (!p) continue;
+    const move = (p / a.base_price - 1) * 100;
+    const hit = a.kind === 'above' ? p >= a.value : a.kind === 'below' ? p <= a.value : a.kind === 'up_pct' ? move >= a.value : -move >= a.value;
+    if (!hit) continue;
+    const done = await withSystem(async c => (await c.query(
+      `UPDATE price_alerts SET active = false, triggered_at = now(), triggered_price = $2 WHERE id = $1 AND active RETURNING id`, [a.id, p])).rowCount);
+    if (!done) continue;
+    const alvo = a.kind.endsWith('pct') ? `${a.value}%` : String(a.value);
+    await notify(a.tenant_id, 'sinal', `Alerta de preço: ${a.symbol} ${KIND_TXT[a.kind]} ${alvo}`,
+      `Preço agora: ${p} (${move >= 0 ? '+' : ''}${move.toFixed(2)}% desde a criação do alerta).${a.note ? ` ${a.note}` : ''}`, a.market, a.symbol);
   }
 }

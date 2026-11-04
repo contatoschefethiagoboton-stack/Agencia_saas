@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { api } from '../api';
+import { useEffect, useState, type ReactNode } from 'react';
+import { api, ApiError } from '../api';
 import { Icon } from '../ui/Icon';
 
 /** Tela de entrada moderna: painel da marca à esquerda e o formulário à direita (no celular, só o formulário). */
@@ -46,9 +46,10 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [payUrl, setPayUrl] = useState<string | null>(null);
 
   async function submit() {
-    setErr(''); setBusy(true);
+    setErr(''); setBusy(true); setPayUrl(null);
     try {
       if (step.kind === 'password') {
         const r = await api('/auth/login', { body: { email, password, area } });
@@ -59,6 +60,7 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
       }
     } catch (e) {
       setErr((e as Error).message);
+      if (e instanceof ApiError && e.status === 402) setPayUrl(e.data.payUrl ?? null);
       if ((e as Error).message.startsWith('Tempo esgotado')) setStep({ kind: 'password' });
     } finally { setBusy(false); }
   }
@@ -108,21 +110,18 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
         )}
 
         {step.kind !== 'forgot' && step.kind !== 'signup' && <>
-          {err && <p className="msg err" role="alert">{err}</p>}
+          {err && <p className={`msg ${payUrl !== null ? 'warn' : 'err'}`} role="alert">{err}</p>}
+          {payUrl && <a className="btn btn-good" href={payUrl} target="_blank" rel="noreferrer">Pagar agora (PIX ou cartão)</a>}
           <button className="btn btn-primary" disabled={busy || (step.kind === 'code' && code.length !== 6)}>
             {busy ? 'Aguarde…' : step.kind === 'password' ? 'Continuar' : 'Entrar'}
           </button>
         </>}
-        {step.kind === 'password' && !isAdmin && (
+        {step.kind === 'password' && (
           <>
             <button type="button" className="link-btn" onClick={() => { setErr(''); setStep({ kind: 'forgot' }); }}>Esqueci minha senha</button>
             <div className="auth-divider">Ainda não tem conta?</div>
-            <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'signup' }); }}>Criar conta grátis</button>
+            <button type="button" className="btn" onClick={() => { setErr(''); setStep({ kind: 'signup' }); }}>Criar conta e escolher plano</button>
           </>
-        )}
-        {step.kind === 'password' && isAdmin && (
-          <p className="card-sub" style={{ margin: 0 }}>Esqueceu a senha ou perdeu o celular do 2FA? Por segurança, a recuperação do administrador
-            é feita só no Render: ADMIN_PASSWORD com a senha nova e ADMIN_RESET = 1, depois deploy.</p>
         )}
         {step.kind === 'code' && (
           <button type="button" className="btn" onClick={() => { setStep({ kind: 'password' }); setErr(''); }}>Voltar</button>
@@ -219,37 +218,57 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
   );
 }
 
-/** Cadastro do próprio investidor. O acesso é liberado depois que a plataforma aprova. */
+interface PlanoPub { id: string; name: string; price_cents: number; description: string }
+
+/** Cadastro: escolhe o plano, paga por PIX ou cartão na página segura do Asaas e o acesso libera sozinho. */
 function Signup({ onBack }: { onBack: () => void }) {
-  const [f, setF] = useState({ name: '', email: '', phone: '', password: '', again: '' });
+  const [plans, setPlans] = useState<PlanoPub[]>([]);
+  const [f, setF] = useState({ name: '', email: '', document: '', phone: '', password: '', again: '', plan: 'medio', billingType: 'PIX', website: '' });
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<{ payUrl?: string } | null>(null);
+  useEffect(() => { api<PlanoPub[]>('/auth/plans').then(setPlans).catch(() => {}); }, []);
   const set = (k: keyof typeof f) => (e: any) => setF({ ...f, [k]: e.target.value });
   async function send() {
     if (f.password !== f.again) return setMsg({ kind: 'err', text: 'As senhas não são iguais' });
     setBusy(true); setMsg(null);
     try {
-      const r = await api('/auth/signup', { body: { business: f.name, name: f.name,
-        email: f.email, phone: f.phone.replace(/\D/g, '') || undefined, password: f.password } });
-      setDone(true); setMsg({ kind: 'ok', text: r.message });
+      const r = await api('/auth/signup', { body: { name: f.name, email: f.email, document: f.document, phone: f.phone.replace(/\D/g, '') || undefined,
+        password: f.password, plan: f.plan, billingType: f.billingType, website: f.website || undefined } });
+      setDone({ payUrl: r.payUrl }); setMsg({ kind: 'ok', text: r.message });
     } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
     finally { setBusy(false); }
   }
-  if (done) return <><p className="msg ok" role="status">{msg?.text}</p><button type="button" className="btn btn-primary" onClick={onBack}>Voltar para o login</button></>;
+  if (done) return <>
+    <p className="msg ok" role="status">{msg?.text}</p>
+    {done.payUrl && <a className="btn btn-good" href={done.payUrl} target="_blank" rel="noreferrer">Ir para o pagamento ({f.billingType === 'PIX' ? 'PIX' : 'cartão'})</a>}
+    <p className="card-sub" style={{ margin: 0 }}>O pagamento é feito na página segura do Asaas: os dados do cartão não passam pela plataforma. Depois, entre com seu e-mail e senha.</p>
+    <button type="button" className="btn btn-primary" onClick={onBack}>Voltar para o login</button></>;
   const field = (k: keyof typeof f, label: string, props: Record<string, unknown> = {}) =>
     <label className="field">{label}<input value={f[k]} onChange={set(k)} {...props} /></label>;
   return (
     <>
-      <p style={{ margin: 0 }} className="card-sub">Preencha os dados. A plataforma confere e libera o seu acesso.</p>
-      {field('name', 'Seu nome completo', { required: true, autoComplete: 'name' })}
+      <div className="plan-pick" role="radiogroup" aria-label="Plano">
+        {plans.map(p => (
+          <button type="button" key={p.id} role="radio" aria-checked={f.plan === p.id} className="plan-opt" onClick={() => setF({ ...f, plan: p.id })}>
+            <b>{p.name}</b><span className="plan-price">{(p.price_cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}<small>/mês</small></span>
+            <small>{p.description}</small>
+          </button>))}
+      </div>
+      {field('name', 'Nome completo', { required: true, autoComplete: 'name' })}
       {field('email', 'E-mail', { type: 'email', required: true, autoComplete: 'email' })}
-      {field('phone', 'Celular (com DDD, opcional)', { inputMode: 'tel', placeholder: '19 99999-9999' })}
+      {field('document', 'CPF', { inputMode: 'numeric', required: true, placeholder: '000.000.000-00' })}
+      {field('phone', 'Celular (com DDD)', { inputMode: 'tel', placeholder: '19 99999-9999' })}
       {field('password', 'Senha (mínimo 10 caracteres)', { type: 'password', minLength: 10, required: true, autoComplete: 'new-password' })}
       {field('again', 'Repita a senha', { type: 'password', minLength: 10, required: true, autoComplete: 'new-password' })}
+      <input className="hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={f.website} onChange={set('website')} name="website" />
+      <div className="seg" role="group" aria-label="Forma de pagamento">
+        <button type="button" aria-pressed={f.billingType === 'PIX'} onClick={() => setF({ ...f, billingType: 'PIX' })}>PIX</button>
+        <button type="button" aria-pressed={f.billingType === 'CREDIT_CARD'} onClick={() => setF({ ...f, billingType: 'CREDIT_CARD' })}>Cartão de crédito</button>
+      </div>
       {msg && <p className={`msg ${msg.kind}`} role="alert">{msg.text}</p>}
-      <button type="button" className="btn btn-primary" disabled={busy || f.name.trim().length < 2 || !f.email.includes('@') || f.password.length < 10}
-              onClick={send}>{busy ? 'Enviando…' : 'Cadastrar'}</button>
+      <button type="button" className="btn btn-primary" disabled={busy || f.name.trim().length < 5 || !f.email.includes('@') || f.document.replace(/\D/g, '').length !== 11 || f.password.length < 10}
+              onClick={send}>{busy ? 'Enviando…' : 'Criar conta e pagar'}</button>
       <button type="button" className="btn" onClick={onBack}>Já tenho conta</button>
     </>
   );

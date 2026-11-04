@@ -12,11 +12,15 @@ const KINDS = ['subscription', 'setup', 'media_budget', 'a_la_carte'];
  * usando externalReference "<tenantId>|<tipo>" que a plataforma mesma definiu.
  */
 export async function ensurePayment(c: PoolClient, gateway: 'asaas' | 'mercadopago', gatewayPaymentId: string,
-                                    externalReference: string | undefined, cents: bigint) {
+                                    externalReference: string | undefined, cents: bigint, subscriptionId?: string) {
   const exists = (await c.query(`SELECT 1 FROM payments WHERE gateway = $1 AND gateway_payment_id = $2`,
                                 [gateway, gatewayPaymentId])).rowCount;
   if (exists) return;
-  const [tenantId, kind] = String(externalReference ?? '').split('|');
+  let [tenantId, kind] = String(externalReference ?? '').split('|');
+  if ((!tenantId || !kind) && subscriptionId) {   // cobrança mensal gerada pela assinatura: acha o cliente pela assinatura
+    tenantId = (await c.query(`SELECT id FROM tenants WHERE asaas_subscription_id = $1`, [subscriptionId])).rows[0]?.id;
+    kind = 'subscription';
+  }
   if (!/^[0-9a-f-]{36}$/i.test(tenantId ?? '') || !KINDS.includes(kind)) return;
   const t = (await c.query(`SELECT 1 FROM tenants WHERE id = $1`, [tenantId])).rowCount;
   if (!t) return;
@@ -33,7 +37,8 @@ export async function confirmPayment(c: PoolClient, gateway: 'asaas' | 'mercadop
   if (!ev.rowCount) return;
 
   const { rows } = await c.query(
-    `SELECT p.id, p.tenant_id, p.kind, p.amount_cents::text AS amount, p.status, t.media_fee_bps, t.status AS tenant_status
+    `SELECT p.id, p.tenant_id, p.kind, p.amount_cents::text AS amount, p.status, t.media_fee_bps, t.status AS tenant_status,
+            (SELECT price_cents::text FROM plans WHERE id = t.plan) AS plan_cents
        FROM payments p JOIN tenants t ON t.id = p.tenant_id
       WHERE p.gateway = $1 AND p.gateway_payment_id = $2 FOR UPDATE OF p`, [gateway, gatewayPaymentId]);
   const p = rows[0];
@@ -63,6 +68,15 @@ export async function confirmPayment(c: PoolClient, gateway: 'asaas' | 'mercadop
       { account: clearing, cents: -paidCents, memo: `Recebimento ${p.kind}` },
       { account: profit, cents: paidCents, memo: `Receita ${p.kind}` },
     ], p.id);
+  }
+  // LIBERAÇÃO AUTOMÁTICA: cadastro aguardando pagamento só ativa se o valor pago for o preço do plano
+  if (p.kind === 'subscription' && p.tenant_status === 'awaiting_payment') {
+    if (BigInt(p.plan_cents ?? -1) === paidCents) {
+      await c.query(`UPDATE tenants SET status = 'active', decided_at = now() WHERE id = $1 AND status = 'awaiting_payment'`, [p.tenant_id]);
+      await audit({ tenantId: p.tenant_id, ip, action: 'tenant.activated_by_payment', meta: { cents: paidCents.toString() } }, c);
+    } else {
+      await audit({ tenantId: p.tenant_id, ip, action: 'payment.amount_mismatch', meta: { expected: p.plan_cents, paid: paidCents.toString(), motivo: 'valor diferente do plano' } }, c);
+    }
   }
   // inadimplente que pagou volta a ficar ativo (não reativa conta travada por fraude ou kill switch)
   if (p.tenant_status === 'suspended')
@@ -99,4 +113,16 @@ export async function reversePayment(c: PoolClient, gateway: 'asaas' | 'mercadop
   }
   await audit({ tenantId: p.tenant_id, ip, action: `payment.${reason}`, target: gatewayPaymentId,
                 meta: { gateway, locked: reason === 'chargeback' } }, c);
+}
+
+/** Mensalidade vencida: suspende (não vale para VIP nem para a conta do administrador). Pagou, volta sozinho. */
+export async function overduePayment(c: PoolClient, gateway: 'asaas', eventId: string, subscriptionId: string | undefined, ip?: string) {
+  const ev = await c.query(`INSERT INTO webhook_events (gateway, event_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING 1`, [gateway, eventId]);
+  if (!ev.rowCount || !subscriptionId) return;
+  const t = (await c.query(`UPDATE tenants SET status = 'suspended', suspended_reason = 'inadimplencia'
+                            WHERE asaas_subscription_id = $1 AND status = 'active' AND NOT vip AND NOT is_platform RETURNING id`, [subscriptionId])).rows[0];
+  if (!t) return;
+  const users = await c.query(`SELECT id FROM users WHERE tenant_id = $1`, [t.id]);
+  await Promise.all(users.rows.map(u => redis.del(`authstate:${u.id}`)));   // vale na hora, sem esperar o cache da sessão
+  await audit({ tenantId: t.id, ip, action: 'billing.overdue_suspended' }, c);
 }

@@ -5,8 +5,8 @@ import { redis } from '../redis.js';
 const store = (prefix: string) =>
   new RedisStore({ prefix, sendCommand: (...args: string[]) => redis.sendCommand(args) });
 
-/** Geral: 300 req / 15 min por IP */
-export const apiLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 300, standardHeaders: 'draft-7',
+/** Geral: 1500 req / 15 min por IP (gráficos e listas atualizam sozinhos) */
+export const apiLimiter = rateLimit({ windowMs: 15 * 60_000, limit: Number(process.env.API_RATE_LIMIT ?? 1500), standardHeaders: 'draft-7',
                                       legacyHeaders: false, store: store('rl:api:') });
 
 /** Login/OTP: 10 tentativas / 15 min por IP + e-mail */

@@ -30,10 +30,11 @@ const adm = client();
 let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 r = await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret) });
 ok(r.s === 200, 'login admin com 2FA');
-r = await adm('/admin/plans'); ok(r.j.length === 3 && r.j.find(p => p.id === 'pro').live_trading === true, 'planos com limites de robôs', r.j);
-r = await adm('/admin/tenants', { name: 'Maria Investidora', plan: 'pro', ownerName: 'Maria', ownerEmail: 'maria@invest.com' });
-ok(r.s === 201, 'admin cadastra cliente Pro', r.j); const tMaria = r.j.id, tempMaria = r.j.tempPassword;
-r = await adm('/admin/tenants', { name: 'João Iniciante', plan: 'starter', ownerName: 'João', ownerEmail: 'joao@invest.com' });
+r = await adm('/admin/plans'); const ativos = r.j.filter(p => p.active);
+ok(ativos.map(p => `${p.id}:${p.price_cents}`).join() === 'basico:5990,medio:8990,top:12990' && ativos.find(p => p.id === 'top').copy_trade, 'planos Básico 59,90 · Médio 89,90 · Top 129,90', ativos);
+r = await adm('/admin/tenants', { name: 'Maria Investidora', plan: 'top', ownerName: 'Maria', ownerEmail: 'maria@invest.com' });
+ok(r.s === 201, 'admin cadastra cliente Top', r.j); const tMaria = r.j.id, tempMaria = r.j.tempPassword;
+r = await adm('/admin/tenants', { name: 'João Iniciante', plan: 'basico', ownerName: 'João', ownerEmail: 'joao@invest.com' });
 const tempJoao = r.j.tempPassword;
 
 async function loginCliente(email, temp) {
@@ -46,11 +47,12 @@ async function loginCliente(email, temp) {
 const cli = await loginCliente('maria@invest.com', tempMaria);
 const joao = await loginCliente('joao@invest.com', tempJoao);
 r = await cli('/auth/me'); ok(r.j.tenant_name === 'Maria Investidora', 'cliente logado');
-r = await adm('/market/overview'); ok(r.s === 403, 'administrador fora do painel de cliente não usa rotas de cliente');
+r = await adm('/market/overview'); ok(r.s === 200 && r.j.length > 0, 'administrador usa a plataforma inteira com o mesmo login');
+r = await adm('/admin/tenants'); ok(r.j.length === 2 && !r.j.some(t => t.name === 'Administração'), 'a conta do administrador não aparece na lista de clientes', r.j.map(t => t.name));
 
 // ---------------- mercado
 r = await cli('/market/status'); ok(r.j.b3Full && r.j.telegram && !r.j.demo, 'status das fontes de dados', r.j);
-r = await cli('/market/strategies'); ok(r.j.length === 5 && r.j.every(s => s.name && s.description), '5 estratégias com descrição', r.j);
+r = await cli('/market/strategies'); ok(r.j.length === 6 && r.j[0].id === 'inteligente' && r.j.every(s => s.name && s.description), '6 estratégias com descrição (inclui a Inteligente)', r.j);
 r = await cli('/market/overview?market=crypto'); ok(r.j.some(q => q.symbol === 'BTCUSDT' && q.price > 0), 'mais negociados de cripto', r.j);
 r = await cli('/market/chart?market=crypto&symbol=btc/usdt&interval=1h');
 ok(r.s === 200 && r.j.symbol === 'BTCUSDT' && r.j.candles.length === 300 && r.j.ind.rsi.length === 300 && r.j.analysis?.signal, 'gráfico com indicadores e análise', r.j.analysis);
@@ -101,7 +103,7 @@ r = await cli(`/bots/${paperId}`, undefined, 'DELETE'); ok(r.j.ok, 'apaga robô 
 
 // ---------------- limites de plano
 r = await joao('/bots', { name: 'Real', market: 'crypto', symbol: 'BTCUSDT', interval: '1h', strategy: 'score', mode: 'live', amount: 50 });
-ok(r.s === 403 && /simulados/.test(r.j.error), 'plano Essencial não libera dinheiro real', r.j);
+ok(r.s === 403 && /simulados/.test(r.j.error), 'plano Básico não libera dinheiro real', r.j);
 await joao('/bots', { name: 'Um', market: 'crypto', symbol: 'BTCUSDT', interval: '1h', strategy: 'score', amount: 50 });
 r = await joao('/bots', { name: 'Dois', market: 'crypto', symbol: 'ETHUSDT', interval: '1h', strategy: 'score', amount: 50 });
 ok(r.s === 403 && /1 robô/.test(r.j.error), 'limite de robôs do plano', r.j);
@@ -135,8 +137,8 @@ r = await adm('/admin/masters', { name: 'Tendência COPY 1h', market: 'crypto', 
 ok(r.s === 201, 'admin publica estratégia master', r.j); const masterId = r.j.id;
 r = await joao('/bots/copy/catalog'); ok(r.j.length === 1 && r.j[0].name === 'Tendência COPY 1h', 'cliente vê o catálogo de copy trade');
 r = await joao(`/bots/${(await joao('/bots')).j[0].id}`, undefined, 'DELETE');
-r = await joao('/bots', { name: 'Copiar', amount: 50, copyOf: masterId }); ok(r.s === 403 && /Copy trade/.test(r.j.error), 'copy trade fora do plano Essencial', r.j);
-r = await cli('/bots', { name: 'Copiando COPY', amount: 50, copyOf: masterId, stopLossPct: 3 }); ok(r.s === 201, 'cliente Pro copia a estratégia', r.j);
+r = await joao('/bots', { name: 'Copiar', amount: 50, copyOf: masterId }); ok(r.s === 403 && /Copy trade/.test(r.j.error), 'copy trade fora do plano Básico', r.j);
+r = await cli('/bots', { name: 'Copiando COPY', amount: 50, copyOf: masterId, stopLossPct: 3 }); ok(r.s === 201, 'cliente Top copia a estratégia', r.j);
 const follower = r.j.id;
 await cli(`/bots/${follower}`, { status: 'active' }, 'PATCH');
 await sleep(800);

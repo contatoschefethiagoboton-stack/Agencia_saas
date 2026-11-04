@@ -9,7 +9,9 @@ Cripto, ações da B3, FIIs e ações dos EUA num painel só, com:
 - **Scanner** dos ativos mais negociados de cada mercado.
 - **Radar de lançamentos**: moedas novas na Binance e ativos novos na B3, com aviso.
 - **FIIs**: ranking por dividend yield de 12 meses, P/VP, liquidez e simulador de renda mensal.
-- **Robôs** (simulado ou dinheiro real) com stop, alvo, perda máxima diária e "vender agora".
+- **Robôs** (simulado ou dinheiro real) com stop, alvo, perda máxima diária e "vender agora". A estratégia **Inteligente**
+  identifica alta confirmada e compra; identifica queda e vende. Com **stop móvel**, o stop sobe junto com o preço e protege o lucro.
+- **Alertas de preço** ("avise quando passar de X" ou "quando cair 5%"), conferidos a cada 20 segundos.
 - **Copy trade**: o administrador publica estratégias e cada cliente as copia na própria corretora, com o próprio valor e stop.
 - **Avisos** na plataforma e no **Telegram**.
 - SaaS: cadastro com aprovação, planos (limite de robôs, dinheiro real, copy trade), cliente VIP, cobrança Asaas,
@@ -17,6 +19,50 @@ Cripto, ações da B3, FIIs e ações dos EUA num painel só, com:
 
 > **Sobre "previsão" e "ganhos":** nenhuma ferramenta prevê o mercado com certeza. Os sinais são cálculos técnicos sobre o
 > histórico e vêm sempre com a taxa de acerto passada para o investidor julgar. A plataforma mostra esse aviso em todas as telas.
+
+## Planos e pagamento
+
+| Plano | Preço | Libera |
+|---|---|---|
+| **Básico** | R$ 59,90/mês | gráficos, sinais, FIIs, lançamentos, 1 robô simulado, 3 alertas de preço |
+| **Médio** | R$ 89,90/mês | + 5 robôs, dinheiro real, avisos no Telegram, 10 alertas de preço |
+| **Top** | R$ 129,90/mês | + 20 robôs, copy trade, alertas de preço ilimitados |
+
+O cliente se cadastra escolhendo o plano e paga por **PIX ou cartão** na página segura do Asaas (os dados do cartão nunca passam
+pela plataforma). A conta é **liberada sozinha** quando o Asaas confirma o pagamento. Mensalidade vencida suspende; pagou, volta.
+O cliente troca de plano e de forma de pagamento em **Assinatura**. Configure no Asaas o webhook
+`https://SEU-SITE/webhooks/pagamentos/asaas` com o token de `ASAAS_WEBHOOK_TOKEN` (eventos de cobrança).
+
+## Administrador
+
+Um login só: o administrador entra pela mesma tela dos clientes e vê **tudo** — a plataforma de investimentos (com conta própria,
+recursos do plano Top) e a área de **Administração**: visão geral, clientes (aprovar, liberar, VIP, bloquear, **excluir**),
+estratégias de copy trade, carteiras, rastreamento e segurança. O endereço secreto antigo (`ADMIN_PATH`) continua funcionando.
+
+## Carteira e transferência entre clientes
+
+Cada cliente pode abrir uma carteira, que é uma **subconta no Asaas** (instituição de pagamento autorizada pelo Banco Central):
+o dinheiro fica no Asaas, nunca no banco de dados da plataforma. Depósito por QR Code PIX, **transferência entre clientes**
+(de subconta para subconta) e **saque para conta bancária** por PIX. Proteções em cada saída de dinheiro:
+
+- código do autenticador **na hora** (confirmação em duas etapas por transação; 5 erros = 15 min sem transações);
+- bloqueio por 24 h depois de entrar por aparelho novo ou trocar senha/2FA (conta invadida não consegue tirar dinheiro);
+- limite por operação (`WALLET_TX_MAX_CENTS`, padrão R$ 5.000) e por dia (`WALLET_DAILY_MAX_CENTS`, padrão R$ 10.000);
+- mais de 10 saídas em 1 hora bloqueia a carteira para análise;
+- chave PIX de saque nova só vale depois de 24 h; e-mail a cada chave nova e a cada saque;
+- o mesmo pedido nunca sai duas vezes (idempotência); o administrador bloqueia qualquer carteira na hora.
+
+A conta principal do Asaas precisa ter a criação de subcontas liberada (fale com o gerente do Asaas).
+
+## Segurança e rastreamento
+
+- **Pagamento falso:** webhook só com token secreto; mesmo assim o pagamento é **reconsultado no Asaas**, e só libera se o valor
+  for exatamente o preço do plano. Comprovante enviado por cliente nunca libera nada. Chargeback trava a conta.
+- **Login falso e roubo de senha:** 2FA obrigatório; conta trava após 5 senhas erradas; **IP que testa senhas em várias contas é
+  bloqueado por 1 hora**; senha que já vazou na internet é recusada (base Have I Been Pwned, consulta anônima); e-mail de alerta
+  a cada acesso por aparelho novo; um cadastro por CPF (com validação); armadilha contra robôs no cadastro.
+- **Site todo rastreado:** cada ação feita com sessão é registrada (usuário, IP, aparelho, caminho, resultado, tempo) e fica em
+  Administração → Rastreamento por 180 dias, com alerta de contas usadas de muitos IPs. Auditoria encadeada por hash à parte.
 
 ## Segurança do dinheiro dos clientes
 

@@ -4,6 +4,7 @@ import { Segmented } from '../ui/Shell';
 import { CandleChart, EquityChart, type Candle, type ChartData, type Overlays } from './CandleChart';
 import { INTERVALS, INTERVAL_LABEL, MARKET_LABEL, price, priceDigits, pct, symbolLabel, tone, type Interval, type Market } from './format';
 import { SignalBadge, ScoreGauge, useStrategies } from './parts';
+import { AlertasPreco } from './Avisos';
 
 export interface Analysis {
   price: number; changePct: number; score: number; signal: 'COMPRA' | 'VENDA' | 'AGUARDAR'; reasons: string[];
@@ -157,6 +158,7 @@ export default function Grafico({ query }: { query: URLSearchParams }) {
             <button className="btn" onClick={watch}>Acompanhar e receber avisos</button>
             <a className="btn btn-primary" href={robotLink}>Criar robô com esta estratégia</a>
           </div>
+          <AlertasPreco key={market + symbol} preset={{ market, symbol }} />
           {msg && <p className="msg ok" role="status">{msg}</p>}
         </div>
 

@@ -9,6 +9,19 @@ type Rule = (ind: Indicators, i: number) => Action;
 const ok = (...xs: number[]) => xs.every(x => Number.isFinite(x));
 
 export const STRATEGIES: Record<string, { name: string; description: string; rule: Rule }> = {
+  inteligente: {
+    name: 'Inteligente (alta e queda)',
+    description: 'Compra quando identifica alta confirmada (preço acima das médias 21 e 50, MACD subindo, RSI entre 50 e 70 e volume). Vende quando identifica queda (fecha abaixo da média de 21 com MACD negativo, ou abaixo da média de 50). Use com stop móvel.',
+    rule: (ind, i) => {
+      const { close, ema21, ema50, macd, rsi, volume, volSma } = ind;
+      if (i < 2 || !ok(ema21[i], ema50[i], macd.hist[i], macd.hist[i - 1], rsi[i])) return null;
+      const up = (k: number) => close[k] > ema21[k] && ema21[k] > ema50[k] && macd.hist[k] > 0 && macd.hist[k] > macd.hist[k - 1]
+        && rsi[k] >= 50 && rsi[k] <= 70 && (!ok(volSma[k]) || volume[k] >= volSma[k] * 0.8);
+      if (up(i) && !up(i - 1)) return 'buy';
+      if ((close[i] < ema21[i] && macd.hist[i] < 0) || close[i] < ema50[i]) return 'sell';
+      return null;
+    },
+  },
   score: {
     name: 'Placar combinado',
     description: 'Soma tendência, momento, RSI, Bandas de Bollinger e volume. Compra com placar ≥ 40 e vende com ≤ −20.',

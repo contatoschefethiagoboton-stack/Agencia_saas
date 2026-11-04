@@ -17,7 +17,7 @@ const notFound = () => Object.assign(new Error('Robô não encontrado'), { statu
 /** Desempenho de cada robô: resultado total, do dia, taxa de acerto e posição aberta. */
 const STATS = `
   SELECT b.id, b.name, b.market, b.symbol, b.interval, b.strategy, b.mode, b.amount::float, b.stop_loss_pct::float, b.take_profit_pct::float,
-         b.max_daily_loss::float, b.status, b.status_reason, b.copy_of, b.connection_id, b.last_tick_at, b.created_at, b.is_master, b.public_description,
+         b.max_daily_loss::float, b.trailing_stop_pct::float, b.status, b.status_reason, b.copy_of, b.connection_id, b.last_tick_at, b.created_at, b.is_master, b.public_description,
          m.name AS copy_name,
          coalesce(sum(t.pnl) FILTER (WHERE t.status = 'closed'), 0)::float AS pnl_total,
          coalesce(sum(t.pnl) FILTER (WHERE t.status = 'closed' AND t.exit_at >= date_trunc('day', now())), 0)::float AS pnl_today,
@@ -41,15 +41,16 @@ botsRouter.get('/:id/trades', async (req, res) => {
 });
 
 /** Limites do plano do cliente (VIP = recursos do maior plano). */
-async function planOf(c: any, tenantId: string) {
-  const p = (await c.query(`SELECT t.vip, p.name, p.max_bots, p.live_trading, p.copy_trade FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1`, [tenantId])).rows[0];
-  return p?.vip ? { ...p, max_bots: 50, live_trading: true, copy_trade: true } : p ?? { max_bots: 1, live_trading: false, copy_trade: false };
+export async function planOf(c: any, tenantId: string) {
+  const p = (await c.query(`SELECT t.vip, p.name, p.max_bots, p.live_trading, p.copy_trade, p.telegram, p.price_alerts FROM tenants t JOIN plans p ON p.id = t.plan WHERE t.id = $1`, [tenantId])).rows[0];
+  return p?.vip ? { ...p, max_bots: 50, live_trading: true, copy_trade: true, telegram: true, price_alerts: -1 }
+    : p ?? { max_bots: 1, live_trading: false, copy_trade: false, telegram: false, price_alerts: 3 };
 }
 
 botsRouter.get('/plan', async (req, res) => {
   res.json(await withTenant(tid(req), async c => {
     const p = await planOf(c, tid(req));
-    return { name: p.name, maxBots: p.max_bots, liveTrading: p.live_trading, copyTrade: p.copy_trade };
+    return { name: p.name, maxBots: p.max_bots, liveTrading: p.live_trading, copyTrade: p.copy_trade, telegram: p.telegram, priceAlerts: p.price_alerts };
   }));
 });
 
@@ -61,6 +62,7 @@ const zBot = z.object({
   amount: z.number().positive().max(1e9),
   stopLossPct: z.number().min(0.1).max(50).nullable().optional(), takeProfitPct: z.number().min(0.1).max(500).nullable().optional(),
   maxDailyLoss: z.number().positive().nullable().optional(), copyOf: z.string().uuid().nullable().optional(),
+  trailingStopPct: z.number().min(0.1).max(50).nullable().optional(),
 });
 
 botsRouter.post('/', async (req, res, next) => {
@@ -95,10 +97,10 @@ async function createBot(req: any, res: any) {
     }
     await getCandles(market as any, symbol, interval as any, 100);   // confirma que o ativo existe antes de salvar
     const r = await c.query(
-      `INSERT INTO bots (tenant_id, name, market, symbol, interval, strategy, mode, connection_id, amount, stop_loss_pct, take_profit_pct, max_daily_loss, copy_of)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+      `INSERT INTO bots (tenant_id, name, market, symbol, interval, strategy, mode, connection_id, amount, stop_loss_pct, take_profit_pct, max_daily_loss, copy_of, trailing_stop_pct)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
       [tid(req), b.name, market, symbol, interval, strategy, b.mode, b.mode === 'live' ? b.connectionId : null, b.amount,
-       b.stopLossPct ?? null, b.takeProfitPct ?? null, b.maxDailyLoss ?? null, b.copyOf ?? null]);
+       b.stopLossPct ?? null, b.takeProfitPct ?? null, b.maxDailyLoss ?? null, b.copyOf ?? null, b.trailingStopPct ?? null]);
     await audit({ actorId: req.user.sub, tenantId: tid(req), ip: req.ip, action: 'bot.created', target: r.rows[0].id, meta: { mode: b.mode, market, symbol } }, c);
     return r.rows[0].id;
   });
@@ -109,7 +111,8 @@ botsRouter.patch('/:id', async (req, res, next) => {
   const id = z.string().uuid().parse(req.params.id);
   const b = z.object({ status: z.enum(['active', 'paused']).optional(), amount: z.number().positive().max(1e9).optional(),
                        stopLossPct: z.number().min(0.1).max(50).nullable().optional(), takeProfitPct: z.number().min(0.1).max(500).nullable().optional(),
-                       maxDailyLoss: z.number().positive().nullable().optional(), name: z.string().trim().min(2).max(60).optional() }).parse(req.body);
+                       maxDailyLoss: z.number().positive().nullable().optional(), name: z.string().trim().min(2).max(60).optional(),
+                       trailingStopPct: z.number().min(0.1).max(50).nullable().optional() }).parse(req.body);
   const bot = await withTenant(tid(req), async c => (await c.query(`SELECT mode FROM bots WHERE id = $1 AND tenant_id = $2`, [id, tid(req)])).rows[0]);
   if (!bot) throw notFound();
   const run = async () => {
@@ -119,10 +122,12 @@ botsRouter.patch('/:id', async (req, res, next) => {
                        amount = coalesce($3, amount), name = coalesce($4, name),
                        stop_loss_pct = CASE WHEN $5 THEN $6 ELSE stop_loss_pct END,
                        take_profit_pct = CASE WHEN $7 THEN $8 ELSE take_profit_pct END,
-                       max_daily_loss = CASE WHEN $9 THEN $10 ELSE max_daily_loss END
+                       max_daily_loss = CASE WHEN $9 THEN $10 ELSE max_daily_loss END,
+                       trailing_stop_pct = CASE WHEN $11 THEN $12 ELSE trailing_stop_pct END
                      WHERE id = $1`,
                     [id, b.status ?? null, b.amount ?? null, b.name ?? null, 'stopLossPct' in b, b.stopLossPct ?? null,
-                     'takeProfitPct' in b, b.takeProfitPct ?? null, 'maxDailyLoss' in b, b.maxDailyLoss ?? null]);
+                     'takeProfitPct' in b, b.takeProfitPct ?? null, 'maxDailyLoss' in b, b.maxDailyLoss ?? null,
+                     'trailingStopPct' in b, b.trailingStopPct ?? null]);
       await audit({ actorId: req.user!.sub, tenantId: tid(req), ip: req.ip, action: 'bot.updated', target: id, meta: b }, c);
     });
     res.json({ ok: true });
