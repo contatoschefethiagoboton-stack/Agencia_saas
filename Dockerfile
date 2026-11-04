@@ -22,7 +22,6 @@ ENV NODE_ENV=production PORT=3000
 WORKDIR /app
 COPY --from=api /app/backend/node_modules ./node_modules
 COPY --from=api /app/backend/dist ./dist
-COPY --from=api /app/backend/assets ./assets
 COPY --from=api /app/backend/package.json ./package.json
 COPY --from=web /app/frontend/dist ./public
 COPY db ./db

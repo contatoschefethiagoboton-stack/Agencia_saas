@@ -1,4 +1,4 @@
-// Cadastro pelo próprio cliente com aprovação da agência; cliente VIP oculto; atividade por cliente.
+// Cadastro pelo próprio cliente com aprovação do administrador; cliente VIP oculto; atividade por cliente.
 import { totpAt } from '../../dist/auth/totp.js';
 import pg from 'pg';
 const B = 'http://localhost:3997';
@@ -30,7 +30,7 @@ ok(t.status === 'pending' && t.signup === 'self' && t.owner_email === 'thiago@cl
 const u = (await db.query(`SELECT phone_e164 FROM users WHERE email = 'thiago@cliente.com'`)).rows[0];
 ok(u.phone_e164 === '+5519999998888', 'WhatsApp salvo no formato internacional', u);
 r = await pub(`/admin/tenants/${t.id}/approve`, {}); ok(r.s === 401, 'aprovar exige ser o administrador');
-r = await adm(`/admin/tenants/${t.id}/approve`, {}); ok(r.j.ok, 'agência aprova o acesso');
+r = await adm(`/admin/tenants/${t.id}/approve`, {}); ok(r.j.ok, 'administrador aprova o acesso');
 r = await adm(`/admin/tenants/${t.id}/approve`, {}); ok(r.s === 409, 'aprovar de novo não faz nada');
 const cli = client();
 r = await cli('/auth/login', { email: 'thiago@cliente.com', password: 'SenhaDoCliente1' });
@@ -39,44 +39,36 @@ r = await cli('/auth/login/verify', { ticket: r.j.ticket, code: code(r.j.secret)
 // recusa
 await pub('/auth/signup', { ...form, business: 'Spam Ltda', email: 'spam@x.com' });
 const spam = (await adm('/admin/tenants')).j.find(x => x.name === 'Spam Ltda');
-r = await adm(`/admin/tenants/${spam.id}/reject`, { reason: 'cadastro falso' }); ok(r.j.ok, 'agência recusa um cadastro');
+r = await adm(`/admin/tenants/${spam.id}/reject`, { reason: 'cadastro falso' }); ok(r.j.ok, 'administrador recusa um cadastro');
 r = await pub('/auth/login', { email: 'spam@x.com', password: 'SenhaDoCliente1' }); ok(r.s === 403 && /não foi aprovado/.test(r.j.error), 'recusado não entra', r.j);
 
 // ---------- VIP oculto ----------
-r = await adm(`/admin/tenants/${t.id}`, { vip: true, vipNote: 'parceiro de longa data' }, 'PATCH'); ok(r.j.ok, 'agência marca o cliente como VIP');
+r = await adm(`/admin/tenants/${t.id}`, { vip: true, vipNote: 'parceiro de longa data' }, 'PATCH'); ok(r.j.ok, 'administrador marca o cliente como VIP');
 t = (await adm('/admin/tenants')).j.find(x => x.id === t.id);
 ok(t.vip === true && t.vip_note === 'parceiro de longa data', 'Painel Master mostra o VIP e a anotação', t);
-for (const p of ['/auth/me', '/client/summary', '/client/dossier', '/client/features', '/client/ads']) {
+for (const p of ['/auth/me', '/bots/plan', '/bots', '/market/watchlist', '/market/alerts']) {
   r = await cli(p); ok(r.s === 200 && !/vip|parceiro de longa/i.test(JSON.stringify(r.j)), `cliente NÃO vê o VIP (${p})`, r.j);
 }
 r = await adm(`/admin/tenants/${t.id}/billing`, {}); ok(r.s === 409 && /VIP/.test(r.j.error), 'VIP é isento de cobrança', r.j);
-await db.query('BEGIN'); await db.query("SELECT set_config('app.tenant_id', $1, true)", [t.id]);
-await db.query(`INSERT INTO api_usage (tenant_id, provider, period, cost_cents, quota_cents) VALUES ($1, 'anthropic', date_trunc('month', now())::date, 0, 5000)`, [t.id]);
-await db.query('COMMIT');
-await adm(`/admin/tenants/${t.id}`, { vip: true }, 'PATCH');
-const quota = async () => { await db.query('BEGIN'); await db.query("SELECT set_config('app.tenant_id', $1, true)", [t.id]);
-  const x = (await db.query(`SELECT quota_cents::bigint AS q FROM api_usage WHERE tenant_id = $1`, [t.id])).rows[0].q; await db.query('COMMIT'); return x; };
-let q = await quota();
-ok(Number(q) >= 100000000, 'VIP sem teto de IA no mês', q);
+r = await cli('/bots/plan'); ok(r.j.maxBots === 50 && r.j.liveTrading && r.j.copyTrade, 'VIP: recursos do maior plano (sem revelar que é VIP)', r.j);
 await adm(`/admin/tenants/${t.id}`, { vip: false }, 'PATCH');
-q = await quota();
-ok(Number(q) === 5000, 'tirar o VIP volta ao teto do plano', q);
+r = await cli('/bots/plan'); ok(r.j.maxBots === 1 && r.j.liveTrading === false, 'sem VIP: volta aos limites do plano Essencial', r.j);
 
 // ---------- atividade do cliente ----------
-await cli('/client/dossier', { data: { nome: 'Controladoria Campos', cidade: 'Campinas', nicho: 'consultoria' } }, 'PUT');
+await cli('/bots', { name: 'Robô BTC', market: 'crypto', symbol: 'BTCUSDT', interval: '1h', strategy: 'score', amount: 50 });
 r = await adm(`/admin/audit?tenantId=${t.id}`);
 const acts = r.j.map(a => a.action);
-ok(['tenant.signup', 'tenant.approved', 'auth.login_ok', 'auth.totp_enabled', 'dossier.saved'].every(a => acts.includes(a)),
-   'agência vê tudo o que aconteceu na conta do cliente (cadastro, aprovação, login, 2FA, ações)', acts);
+ok(['tenant.signup', 'tenant.approved', 'auth.login_ok', 'auth.totp_enabled', 'bot.created'].every(a => acts.includes(a)),
+   'administrador vê tudo o que aconteceu na conta do cliente (cadastro, aprovação, login, 2FA, ações)', acts);
 r = await cli(`/admin/audit?tenantId=${t.id}`); ok(r.s === 403, 'cliente não vê a auditoria');
 
-// ---------- logins separados: agência em /admin, clientes na tela principal ----------
+// ---------- logins separados: administrador em /admin, clientes na tela principal ----------
 r = await client()('/auth/login', { email: 'dono@agencia.com', password: 'SenhaForte123' });
 ok(r.s === 401 && r.j.error === 'E-mail ou senha incorretos', 'administrador NÃO entra pela tela dos clientes (resposta genérica)', r.j);
 r = await client()('/auth/login', { area: 'admin', email: 'thiago@cliente.com', password: 'SenhaDoCliente1' });
-ok(r.s === 401 && r.j.error === 'E-mail ou senha incorretos', 'cliente NÃO entra pelo acesso da agência', r.j);
+ok(r.s === 401 && r.j.error === 'E-mail ou senha incorretos', 'cliente NÃO entra pelo acesso do administrador', r.j);
 r = await client()('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
-ok(r.j.method === 'totp', 'administrador entra pelo acesso da agência', r.j);
+ok(r.j.method === 'totp', 'administrador entra pelo acesso do administrador', r.j);
 r = await client()('/auth/login', { area: 'cliente', email: 'thiago@cliente.com', password: 'SenhaDoCliente1' });
 ok(r.j.method === 'totp', 'cliente entra pela tela principal', r.j);
 const wrong = (await db.query(`SELECT count(*)::int n FROM audit_log WHERE action = 'auth.wrong_area'`)).rows[0].n;

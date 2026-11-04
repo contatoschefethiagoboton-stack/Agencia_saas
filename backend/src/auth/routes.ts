@@ -26,7 +26,7 @@ async function totpOnce(userId: string, secret: string, code: string) {
   if (step === null) return false;
   return (await redis.set(`totp:used:${userId}:${step}`, '1', { NX: true, EX: 120 })) === 'OK';
 }
-const whatsappOtpReady = () => Boolean(process.env.WHATSAPP_SYSTEM_TOKEN && process.env.PLATFORM_WA_PHONE_ID);
+const whatsappOtpReady = () => false;   // 2FA só por aplicativo autenticador
 
 /*
  * Login em duas etapas, 2FA SEMPRE obrigatório:
@@ -77,8 +77,8 @@ authRouter.post('/login', loginLimiter, async (req, res) => {
     // cadastro feito pelo próprio cliente só entra depois que a agência aprova
     if (u.tenant_id) {
       const st = (await c.query(`SELECT status FROM tenants WHERE id = $1`, [u.tenant_id])).rows[0]?.status;
-      if (st === 'pending') return res.status(403).json({ error: 'Seu cadastro está aguardando a aprovação da agência. Você recebe um aviso quando for liberado.' });
-      if (st === 'rejected') return res.status(403).json({ error: 'Seu cadastro não foi aprovado. Fale com a agência.' });
+      if (st === 'pending') return res.status(403).json({ error: 'Seu cadastro está aguardando a aprovação da plataforma. Você recebe um aviso quando for liberado.' });
+      if (st === 'rejected') return res.status(403).json({ error: 'Seu cadastro não foi aprovado. Fale com o suporte.' });
     }
     if (u.totp_enabled) return res.json({ ticket: signTicket({ sub: u.id, method: 'totp' }), method: 'totp' });
     if (u.phone_e164 && whatsappOtpReady()) {
@@ -237,7 +237,7 @@ authRouter.post('/forgot', loginLimiter, async (req, res) => {
       await appPool.query(`INSERT INTO password_resets (user_id, token_hash, expires_at, ip) VALUES ($1, $2, now() + interval '30 minutes', $3::inet)`,
                           [u.id, sha(token), req.ip ?? null]);
       const link = `${publicUrl()}/#redefinir?token=${token}`;
-      const app = process.env.APP_NAME ?? 'Agência Hub';
+      const app = process.env.APP_NAME ?? 'Radar Invest';
       // envio em segundo plano: a resposta leva o mesmo tempo para e-mail cadastrado ou não (sem pista por tempo)
       void sendMail(email, `${app}: redefinir sua senha`,
           `Olá${u.name ? `, ${u.name.split(' ')[0]}` : ''}!\n\nRecebemos um pedido para redefinir a senha da sua conta.\n` +
@@ -301,8 +301,6 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
     const phone = d.phone ? (d.phone.startsWith('+') ? d.phone : `+${d.phone.length <= 11 ? '55' : ''}${d.phone}`) : null;
     await c.query(`INSERT INTO users (tenant_id, email, password_hash, phone_e164, role, name) VALUES ($1, $2, $3, $4, 'owner', $5)`,
                   [t.id, email, hash, phone, d.name]);
-    await c.query("SELECT set_config('app.tenant_id', $1, true)", [t.id]);   // RLS: o dossiê é do tenant recém-criado
-    await c.query(`INSERT INTO business_dossier (tenant_id, data) VALUES ($1, $2)`, [t.id, { nome: d.business, nicho: d.niche, cidade: d.city }]);
     await audit({ tenantId: t.id, ip: req.ip, action: 'tenant.signup', meta: { email } }, c);
     await c.query('COMMIT');
     // avisa a agência por e-mail (se configurado)
@@ -313,7 +311,7 @@ authRouter.post('/signup', signupLimiter, async (req, res) => {
         `<p><b>${d.name}</b> (${email}) cadastrou <b>${d.business}</b>.</p><p><a href="${publicUrl()}${adminPath()}#master-clientes">Aprovar ou recusar no Painel Master</a></p>`)
         .catch(e => console.error('[e-mail]', (e as Error).message));
     }
-    res.status(201).json({ ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a agência aprovar.' });
+    res.status(201).json({ ok: true, message: 'Cadastro recebido! Você vai poder entrar assim que a plataforma aprovar.' });
   } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
   finally { c.release(); }
 });

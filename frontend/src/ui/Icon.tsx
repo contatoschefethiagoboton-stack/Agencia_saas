@@ -16,6 +16,15 @@ const P: Record<string, string> = {
   back: 'M19 12H5M12 19l-7-7 7-7',
   external: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3',
   lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
+  chart: 'M3 3v18h18M7 15l4-4 3 3 6-7',
+  candles: 'M6 4v4M6 16v4M18 6v3M18 17v3M10 9v7M14 4v4M4 8h4v8H4zM16 9h4v8h-4zM12 8h4v7h-4z',
+  bolt: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  bot: 'M12 8V4M8 4h8M5 8h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM9 13h.01M15 13h.01M9 17h6',
+  copy: 'M9 9h11v11H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+  radar: 'M12 12 19 5M21 12a9 9 0 1 1-9-9M17 12a5 5 0 1 1-5-5M12 12h.01',
+  building: 'M4 21V5l8-3v19M12 8h8v13M8 7h.01M8 11h.01M8 15h.01M16 12h.01M16 16h.01M2 21h20',
+  bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0',
+  bank: 'M3 10 12 4l9 6M5 10v8M9 10v8M15 10v8M19 10v8M3 21h18',
   spark: 'M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4zM19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z',
 };
 
@@ -26,29 +35,4 @@ export function Icon({ name, size = 20 }: { name: keyof typeof P | string; size?
       <path d={P[name] ?? P.spark} />
     </svg>
   );
-}
-
-/** Marcas das redes (cores oficiais, formas simplificadas). */
-export function BrandMark({ net, size = 40 }: { net: 'meta' | 'google' | 'tiktok'; size?: number }) {
-  const box = { width: size, height: size, borderRadius: size * 0.28, display: 'grid', placeItems: 'center', flex: 'none' } as const;
-  if (net === 'google') return (
-    <span style={{ ...box, background: '#fff' }} aria-hidden="true">
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 24 24">
-        <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
-        <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
-        <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6h-4a12 12 0 0 0 0 10.8z" />
-        <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.8 3.6-4.9 6.7-4.9z" />
-      </svg></span>);
-  if (net === 'tiktok') return (
-    <span style={{ ...box, background: '#000' }} aria-hidden="true">
-      <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24">
-        <path fill="#25F4EE" d="M9.4 9.6V8.7a6.8 6.8 0 0 0-.9 0 6.6 6.6 0 0 0-3.8 12A6.6 6.6 0 0 1 9.4 9.6z" />
-        <path fill="#FE2C55" d="M17.8 5.3a4.9 4.9 0 0 1-2.2-3.2H13v13.2a2.8 2.8 0 1 1-2-2.7V9.6a6.6 6.6 0 0 0-5.3 11.1 6.6 6.6 0 0 0 10.2-5.5V8.5a8.5 8.5 0 0 0 5 1.6V7.5a4.9 4.9 0 0 1-3.1-2.2z" />
-        <path fill="#fff" d="M16.9 8.5a8.5 8.5 0 0 0 4.9 1.6V7.5a5 5 0 0 1-4-2.2 4.9 4.9 0 0 1-2.2-3.2H13v13.2a2.8 2.8 0 0 1-5.1 1.6 2.8 2.8 0 0 1 3.1-4.3V9.6a6.6 6.6 0 0 0-5.3 11.1 6.6 6.6 0 0 0 11.2-4.7z" />
-      </svg></span>);
-  return (
-    <span style={{ ...box, background: 'linear-gradient(135deg,#0866FF,#A033FF 55%,#FF5C87)' }} aria-hidden="true">
-      <svg width={size * 0.6} height={size * 0.6} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.2} strokeLinecap="round">
-        <path d="M4 15c0-4 2-8 4.5-8 3 0 4.5 10 7.5 10 2 0 4-2 4-5s-1.5-5-3.5-5C13 7 11 17 7.5 17 5.5 17 4 16.5 4 15z" />
-      </svg></span>);
 }

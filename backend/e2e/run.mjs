@@ -22,12 +22,9 @@ const env = {
   ...process.env, NODE_ENV: 'production', PORT: '3997', DATABASE_URL, REDIS_URL,
   JWT_SECRET: 'e2e-jwt-secret-bem-grande-1234567890', OTP_PEPPER: 'pepper', TOKEN_ENC_KEY: Buffer.alloc(32, 'k').toString('base64'),
   ADMIN_EMAIL: 'dono@agencia.com', ADMIN_PASSWORD: 'SenhaForte123', PUBLIC_URL: 'http://localhost:3997',
-  META_APP_ID: '123', META_APP_SECRET: 'segredo-app', META_GRAPH_URL: 'http://localhost:4555',
-  GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsec', GOOGLE_API_OVERRIDE: 'http://localhost:4555',
-  TIKTOK_CLIENT_KEY: 'tkey', TIKTOK_CLIENT_SECRET: 'tsec', TIKTOK_API_OVERRIDE: 'http://localhost:4555', TIKTOK_POLL_MS: '300',
-  TIKTOK_VERIFY_FILENAME: 'tiktok-verificacao.txt', TIKTOK_VERIFY_CONTENT: 'tiktok-developers-site-verification=ABC123',
-  IMAGE_API_KEY: 'img-key', IMAGE_API_URL: 'http://localhost:4555/v1',
-  ADS_GUARD_INTERVAL_MS: '3000', PUBLISHER_INTERVAL_MS: '1500', MIGRATIONS_DIR: path.resolve(BACKEND, '../db/migrations'),
+  BINANCE_DATA_URL: 'http://localhost:4555/binance', BINANCE_API_URL: 'http://localhost:4555/binance',
+  BRAPI_URL: 'http://localhost:4555/brapi', BRAPI_TOKEN: 'brapi-e2e', TELEGRAM_BOT_TOKEN: 'tg-e2e', TELEGRAM_API_URL: 'http://localhost:4555/telegram',
+  BOT_TICK_MS: '700', MARKET_CACHE_SEC: '1', RADAR_INTERVAL_MS: '2000', MIGRATIONS_DIR: path.resolve(BACKEND, '../db/migrations'),
   MAIL_OUTBOX_FILE: path.join(os.tmpdir(), 'agencia-e2e-emails.jsonl'),
   ADMIN_PATH: '/acesso-secreto-e2e', WEB_DIR: path.join(os.tmpdir(), 'agencia-e2e-web'),
 };
@@ -64,7 +61,7 @@ for (const suite of suites) {
   const api = spawn('node', ['dist/server.js'], { cwd: BACKEND, env, stdio: ['ignore', 'ignore', 'pipe'] });
   let apiErr = ''; api.stderr.on('data', d => { apiErr += d; });
   try {
-    await waitUp('http://localhost:4555/v1/__log'); await waitUp('http://localhost:3997/healthz');
+    await waitUp('http://localhost:4555/__log'); await waitUp('http://localhost:3997/healthz');
     const t0 = Date.now();
     const r = spawnSync('node', [path.join(DIR, 'suites', suite)], { cwd: BACKEND, env, encoding: 'utf8', timeout: 300_000 });
     const out = r.stdout + r.stderr;

@@ -71,20 +71,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: docker build -t agencia-saas .
+        run: docker build -t radar-invest .
       - name: Sobe sem nenhuma configuração (Redis interno, sem banco) e responde
         run: |
-          docker run -d --name app -p 3000:3000 agencia-saas
+          docker run -d --name app -p 3000:3000 radar-invest
           for i in $(seq 1 30); do curl -fs localhost:3000/healthz && break; sleep 1; done
           curl -fs localhost:3000/healthz
           curl -fs localhost:3000/ | grep -q '<div id="root">'
           docker logs app
-      - name: Gerador de artes funciona no Alpine (binário musl + fontes)
-        run: |
-          docker run --rm --entrypoint node agencia-saas -e "
-            import('./dist/art/render.js').then(m => {
-              const r = m.renderArt({ template: 'oferta', format: 'feed', headline: 'Teste de arte', cta: 'Peça já',
-                brand: { name: 'Teste', primary: '#7A3E12', secondary: '#F2B33D' } });
-              if (r.width !== 1080 || r.jpg.length < 10000) throw new Error('arte inválida');
-              console.log('arte ok', r.width + 'x' + r.height, r.jpg.length, 'bytes');
-            })"

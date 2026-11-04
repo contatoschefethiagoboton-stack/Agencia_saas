@@ -7,20 +7,20 @@ export function AuthLayout({ admin, children }: { admin?: boolean; children: Rea
   return (
     <div className="auth">
       <aside className={`auth-brand${admin ? ' admin' : ''}`}>
-        <div className="auth-logo"><i>A</i>Agência Hub</div>
+        <div className="auth-logo"><i>R</i>Radar Invest</div>
         {admin ? <>
-          <h2>Painel Master da agência</h2>
+          <h2>Painel Master da plataforma</h2>
           <ul>
-            <li><Icon name="users" />Todos os clientes, aprovações e contas VIP</li>
-            <li><Icon name="wallet" />Tesouraria, cobranças e repasses</li>
+            <li><Icon name="users" />Clientes, planos, aprovações e contas VIP</li>
+            <li><Icon name="copy" />Estratégias de copy trade</li>
             <li><Icon name="shield" />Auditoria, modo pânico e 2FA obrigatório</li>
           </ul>
         </> : <>
-          <h2>Seu marketing no piloto automático</h2>
+          <h2>Cripto, ações e FIIs com sinais em tempo real</h2>
           <ul>
-            <li><Icon name="spark" />Posts e artes criados com IA para o seu negócio</li>
-            <li><Icon name="check" />Você aprova com um toque, a gente publica</li>
-            <li><Icon name="link" />Instagram, Facebook, Google e TikTok num só lugar</li>
+            <li><Icon name="chart" />Gráficos profissionais com médias, RSI, MACD e Bollinger</li>
+            <li><Icon name="bolt" />Sinais de compra e venda com acerto histórico e backtest</li>
+            <li><Icon name="bot" />Robôs e copy trade na sua própria corretora</li>
           </ul>
         </>}
         <small className="card-sub">Acesso protegido com verificação em duas etapas.</small>
@@ -37,7 +37,7 @@ type Step =
   | { kind: 'signup' }
   | { kind: 'code'; ticket: string; method: 'totp' | 'whatsapp' | 'totp_setup'; qr?: string; secret?: string };
 
-/** Login com 2FA obrigatório. area="admin" é o acesso separado da agência (/admin); "cliente" é a tela principal. */
+/** Login com 2FA obrigatório. area="admin" é o acesso separado do administrador (ADMIN_PATH); "cliente" é a tela principal. */
 export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChangePassword: boolean) => void; area?: 'cliente' | 'admin' }) {
   const isAdmin = area === 'admin';
   const [step, setStep] = useState<Step>({ kind: 'password' });
@@ -66,10 +66,10 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
   return (
     <AuthLayout admin={isAdmin}>
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); if (step.kind !== 'forgot' && step.kind !== 'signup') submit(); }}>
-        <div className="auth-logo auth-mobile-logo"><i>A</i>Agência Hub</div>
+        <div className="auth-logo auth-mobile-logo"><i>R</i>Radar Invest</div>
         <div>
-          <span className="eyebrow card-sub">{isAdmin ? 'Painel Master · acesso restrito' : step.kind === 'password' ? 'Bem-vindo de volta' : 'Agência Hub'}</span>
-          <h1>{step.kind === 'password' ? (isAdmin ? 'Acesso da agência' : 'Entrar') : step.kind === 'forgot' ? 'Esqueci minha senha' : step.kind === 'signup' ? 'Criar conta' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
+          <span className="eyebrow card-sub">{isAdmin ? 'Painel Master · acesso restrito' : step.kind === 'password' ? 'Bem-vindo de volta' : 'Radar Invest'}</span>
+          <h1>{step.kind === 'password' ? (isAdmin ? 'Acesso do administrador' : 'Entrar') : step.kind === 'forgot' ? 'Esqueci minha senha' : step.kind === 'signup' ? 'Criar conta' : step.method === 'totp_setup' ? 'Proteja sua conta' : 'Verificação em duas etapas'}</h1>
         </div>
 
         {step.kind === 'signup' ? (
@@ -100,8 +100,7 @@ export default function Login({ onDone, area = 'cliente' }: { onDone: (mustChang
               </>
             )}
             {step.method === 'totp' && <p style={{ margin: 0 }}>Abra seu aplicativo autenticador e digite o código.</p>}
-            {step.method === 'whatsapp' && <p style={{ margin: 0 }}>Enviamos um código para o seu WhatsApp.</p>}
-            <label className="field">Código de 6 dígitos
+                        <label className="field">Código de 6 dígitos
               <input className="code-input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus
                      value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} />
             </label>
@@ -147,7 +146,7 @@ export function ChangePassword({ onDone }: { onDone: () => void }) {
   return (
     <AuthLayout>
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); submit(); }}>
-        <div className="auth-logo auth-mobile-logo"><i>A</i>Agência Hub</div>
+        <div className="auth-logo auth-mobile-logo"><i>R</i>Radar Invest</div>
         <h1>Crie sua senha</h1>
         <p style={{ margin: 0 }} className="card-sub">Você entrou com uma senha provisória. Escolha uma nova com pelo menos 10 caracteres.</p>
         <label className="field">Senha provisória
@@ -205,8 +204,8 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
   return (
     <AuthLayout>
       <form className="card auth-card" onSubmit={e => { e.preventDefault(); done ? onDone() : submit(); }}>
-        <div className="auth-logo auth-mobile-logo"><i>A</i>Agência Hub</div>
-        <div><span className="eyebrow card-sub">Agência Hub</span><h1>Criar senha nova</h1></div>
+        <div className="auth-logo auth-mobile-logo"><i>R</i>Radar Invest</div>
+        <div><span className="eyebrow card-sub">Radar Invest</span><h1>Criar senha nova</h1></div>
         {!done && <>
           <label className="field">Senha nova (mínimo 10 caracteres)
             <input type="password" autoComplete="new-password" required minLength={10} value={pw} onChange={e => setPw(e.target.value)} /></label>
@@ -220,9 +219,9 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: () => 
   );
 }
 
-/** Cadastro do próprio cliente. O acesso só é liberado depois que a agência aprova. */
+/** Cadastro do próprio investidor. O acesso é liberado depois que a plataforma aprova. */
 function Signup({ onBack }: { onBack: () => void }) {
-  const [f, setF] = useState({ business: '', niche: '', city: '', name: '', email: '', phone: '', password: '', again: '' });
+  const [f, setF] = useState({ name: '', email: '', phone: '', password: '', again: '' });
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -231,7 +230,7 @@ function Signup({ onBack }: { onBack: () => void }) {
     if (f.password !== f.again) return setMsg({ kind: 'err', text: 'As senhas não são iguais' });
     setBusy(true); setMsg(null);
     try {
-      const r = await api('/auth/signup', { body: { business: f.business, niche: f.niche || undefined, city: f.city || undefined, name: f.name,
+      const r = await api('/auth/signup', { body: { business: f.name, name: f.name,
         email: f.email, phone: f.phone.replace(/\D/g, '') || undefined, password: f.password } });
       setDone(true); setMsg({ kind: 'ok', text: r.message });
     } catch (e) { setMsg({ kind: 'err', text: (e as Error).message }); }
@@ -242,17 +241,14 @@ function Signup({ onBack }: { onBack: () => void }) {
     <label className="field">{label}<input value={f[k]} onChange={set(k)} {...props} /></label>;
   return (
     <>
-      <p style={{ margin: 0 }} className="card-sub">Preencha os dados. A agência confere e libera o seu acesso.</p>
-      {field('business', 'Nome do negócio', { required: true })}
-      {field('niche', 'Ramo', { placeholder: 'padaria, clínica, barbearia, consultoria…' })}
-      {field('city', 'Cidade / bairro')}
-      {field('name', 'Seu nome', { required: true, autoComplete: 'name' })}
+      <p style={{ margin: 0 }} className="card-sub">Preencha os dados. A plataforma confere e libera o seu acesso.</p>
+      {field('name', 'Seu nome completo', { required: true, autoComplete: 'name' })}
       {field('email', 'E-mail', { type: 'email', required: true, autoComplete: 'email' })}
-      {field('phone', 'WhatsApp (com DDD)', { inputMode: 'tel', placeholder: '19 99999-9999' })}
+      {field('phone', 'Celular (com DDD, opcional)', { inputMode: 'tel', placeholder: '19 99999-9999' })}
       {field('password', 'Senha (mínimo 10 caracteres)', { type: 'password', minLength: 10, required: true, autoComplete: 'new-password' })}
       {field('again', 'Repita a senha', { type: 'password', minLength: 10, required: true, autoComplete: 'new-password' })}
       {msg && <p className={`msg ${msg.kind}`} role="alert">{msg.text}</p>}
-      <button type="button" className="btn btn-primary" disabled={busy || !f.business || !f.name || !f.email.includes('@') || f.password.length < 10}
+      <button type="button" className="btn btn-primary" disabled={busy || f.name.trim().length < 2 || !f.email.includes('@') || f.password.length < 10}
               onClick={send}>{busy ? 'Enviando…' : 'Cadastrar'}</button>
       <button type="button" className="btn" onClick={onBack}>Já tenho conta</button>
     </>

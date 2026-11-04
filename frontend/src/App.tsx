@@ -5,17 +5,20 @@ import Login, { ChangePassword, ResetPassword } from './auth/Login';
 import { StepUpProvider } from './auth/StepUp';
 import Visao from './admin/Visao';
 import Clientes from './admin/Clientes';
-import Financeiro from './admin/Financeiro';
 import Seguranca from './admin/Seguranca';
-import Resumo from './cliente/Resumo';
-import Negocio from './cliente/Negocio';
-import ApprovalQueue from './cliente/ApprovalQueue';
-import Inbox from './cliente/Inbox';
-import Conexoes from './cliente/Conexoes';
-import Marca from './cliente/Marca';
-import Anuncios from './cliente/Anuncios';
-import { onLoginResult } from './ui/oauthPopup';
+import Masters from './admin/Masters';
+import Mercado from './invest/Mercado';
+import Grafico from './invest/Grafico';
+import Sinais from './invest/Sinais';
+import Radar from './invest/Radar';
+import Fiis from './invest/Fiis';
+import Robos from './invest/Robos';
+import Copy from './invest/Copy';
+import Corretoras from './invest/Corretoras';
+import Avisos from './invest/Avisos';
+import { Disclaimer } from './invest/parts';
 import './ui/forms.css';
+import './invest/invest.css';
 
 const useHash = (fallback: string) => {
   const [h, setH] = useState(location.hash || fallback);
@@ -25,14 +28,14 @@ const useHash = (fallback: string) => {
 
 const navDono: NavItem[] = [
   { href: '#master', label: 'Visão geral', icon: 'home' }, { href: '#master-clientes', label: 'Clientes', icon: 'users' },
-  { href: '#master-financeiro', label: 'Tesouraria', icon: 'wallet' }, { href: '#master-seguranca', label: 'Segurança e auditoria', icon: 'shield' },
+  { href: '#master-copy', label: 'Copy trade', icon: 'copy' }, { href: '#master-seguranca', label: 'Segurança e auditoria', icon: 'shield' },
 ];
-const navCliente: NavItem[] = [
-  { href: '#cliente', label: 'Painel', icon: 'home' },
-  { href: '#aprovacoes', label: 'Aprovações', icon: 'check', group: 'Conteúdo' }, { href: '#anuncios', label: 'Anúncios', icon: 'megaphone', group: 'Conteúdo' },
-  { href: '#atendimento', label: 'Atendimento WhatsApp', icon: 'chat', group: 'Conteúdo' },
-  { href: '#negocio', label: 'Meu negócio', icon: 'store', group: 'Configurar' }, { href: '#marca', label: 'Identidade visual', icon: 'palette', group: 'Configurar' },
-  { href: '#conexoes', label: 'Conexões', icon: 'link', group: 'Configurar' },
+const navCliente = (unread: number): NavItem[] => [
+  { href: '#mercado', label: 'Mercado', icon: 'home' }, { href: '#grafico', label: 'Gráficos', icon: 'candles' },
+  { href: '#sinais', label: 'Sinais', icon: 'bolt' }, { href: '#radar', label: 'Lançamentos', icon: 'radar' },
+  { href: '#fiis', label: 'Fundos imobiliários', icon: 'building' },
+  { href: '#robos', label: 'Robôs', icon: 'bot', group: 'Automático' }, { href: '#copy', label: 'Copy trade', icon: 'copy', group: 'Automático' },
+  { href: '#corretoras', label: 'Corretoras', icon: 'bank', group: 'Conta' }, { href: '#avisos', label: 'Avisos', icon: 'bell', group: 'Conta', count: unread },
 ];
 
 /** O servidor marca a página só no endereço secreto da agência (ADMIN_PATH). Em qualquer outro endereço, só existe o login de cliente. */
@@ -70,37 +73,39 @@ export default function App() {
 function AreaMaster({ me, logout }: { me: Me; logout: () => void }) {
   const [hash, qs] = useHash('#master').split('?');
   const tenantId = new URLSearchParams(qs ?? '').get('tenant') ?? undefined;
-  const page = hash === '#master-clientes' ? <Clientes /> : hash === '#master-financeiro' ? <Financeiro />
+  const page = hash === '#master-clientes' ? <Clientes /> : hash === '#master-copy' ? <Masters />
     : hash === '#master-seguranca' ? <Seguranca key={tenantId ?? 'all'} tenantId={tenantId} /> : <Visao />;
   return (
-    <Shell brand="Agência Hub" sub="Painel Master" logo="A" logoColor="var(--grad)" nav={navDono} current={hash} user={me.email} onLogout={logout}>
-      {me.panic?.on && <p className="banner panic" role="alert">MODO PÂNICO ATIVO: IA, anúncios e envios de WhatsApp estão desligados. <a href="#master-seguranca">Ver</a></p>}
+    <Shell brand="Radar Invest" sub="Painel Master" logo="R" logoColor="var(--grad)" nav={navDono} current={hash} user={me.email} onLogout={logout}>
+      {me.panic?.on && <p className="banner panic" role="alert">MODO PÂNICO ATIVO: todos os robôs estão congelados. <a href="#master-seguranca">Ver</a></p>}
       {page}
     </Shell>
   );
 }
 
 function AreaCliente({ me, logout }: { me: Me; logout: () => void }) {
-  const [hash, qs] = useHash('#cliente').split('?');            // ex.: #conexoes?meta=… (volta do login da Meta)
+  const [hash, qs] = useHash('#mercado').split('?');            // ex.: #grafico?market=crypto&symbol=BTCUSDT
   const query = new URLSearchParams(qs ?? '');
-  // resultado do login das redes (janela separada): abre Conexões com a escolha da página/perfil
-  useEffect(() => onLoginResult(h => { location.hash = h; window.focus(); }), []);
+  const [unread, setUnread] = useState(0);
+  const loadUnread = useCallback(() => { api<{ unread: number }>('/market/alerts').then(r => setUnread(r.unread)).catch(() => {}); }, []);
+  useEffect(() => { loadUnread(); const t = setInterval(loadUnread, 60_000); return () => clearInterval(t); }, [loadUnread]);
   const stopImpersonating = async () => { await api('/auth/impersonate/stop', { body: {} }); location.hash = '#master-clientes'; location.reload(); };
-  const initials = (me.tenant_name ?? '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const initials = (me.tenant_name ?? me.name ?? '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const page = hash === '#grafico' ? <Grafico key={qs ?? ''} query={query} /> : hash === '#sinais' ? <Sinais /> : hash === '#radar' ? <Radar />
+    : hash === '#fiis' ? <Fiis /> : hash === '#robos' ? <Robos key={qs ?? ''} query={query} /> : hash === '#copy' ? <Copy />
+    : hash === '#corretoras' ? <Corretoras /> : hash === '#avisos' ? <Avisos onRead={() => setUnread(0)} /> : <Mercado />;
   return (
-    <Shell brand={me.tenant_name ?? 'Meu negócio'} sub={me.impersonating ? 'Painel do cliente (agência)' : me.city ?? me.email} logo={initials} logoColor="var(--teal)"
-           nav={navCliente} current={hash} flush={hash === '#atendimento'} user={me.email}
+    <Shell brand={me.tenant_name ?? 'Minha conta'} sub={me.impersonating ? 'Painel do cliente (suporte)' : me.email} logo={initials} logoColor="var(--teal)"
+           nav={navCliente(unread)} current={hash} user={me.email}
            onLogout={me.impersonating ? stopImpersonating : logout} logoutLabel={me.impersonating ? 'Voltar ao Painel Master' : 'Sair'}>
       {me.impersonating && (
         <div className="banner" role="status" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between',
-             borderStyle: 'solid', borderColor: 'var(--accent)', margin: hash === '#atendimento' ? 16 : 0 }}>
-          <span>Você está no painel de <b>{me.tenant_name}</b> como agência ({me.email}). Tudo fica registrado na auditoria.</span>
+             borderStyle: 'solid', borderColor: 'var(--accent)' }}>
+          <span>Você está no painel de <b>{me.tenant_name}</b> como administrador ({me.email}). Tudo fica registrado na auditoria.</span>
           <button className="btn btn-primary" onClick={stopImpersonating}>Voltar ao Painel Master</button>
         </div>)}
-      {hash === '#aprovacoes' ? <ApprovalQueue /> : hash === '#atendimento' ? <Inbox /> : hash === '#negocio' ? <Negocio />
-        : hash === '#marca' ? <Marca />
-        : hash === '#anuncios' ? <Anuncios isOwner={me.role === 'owner'} />
-        : hash === '#conexoes' ? <Conexoes key={qs ?? ''} query={query} isOwner={me.role === 'owner'} /> : <Resumo me={me} />}
+      {page}
+      <Disclaimer />
     </Shell>
   );
 }

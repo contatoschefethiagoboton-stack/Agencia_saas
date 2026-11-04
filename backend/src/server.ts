@@ -6,55 +6,36 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { authRouter } from './auth/routes.js';
 import { webhookRouter } from './payments/webhooks.js';
-import { waWebhookRouter } from './whatsapp/webhooks.js';
-import { inboxRouter } from './whatsapp/inboxRoutes.js';
 import { adminRouter } from './admin/routes.js';
 import { requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
-import { clientRouter, approvalsRouter } from './client/routes.js';
-import { metaCallbackRouter } from './integrations/meta/oauth.js';
-import { googleCallbackRouter } from './integrations/google/google.js';
-import { tiktokCallbackRouter, tiktokVerifyRouter } from './integrations/tiktok/tiktok.js';
-import { servicePool } from './db.js';
+import { marketRouter } from './market/routes.js';
+import { botsRouter } from './bots/routes.js';
 import { encryptionKeyStatus } from './security/vault.js';
 import { adminPath, publicUrl } from './config.js';
 
 const app = express();
 app.set('trust proxy', 1);                   // atrás do proxy do Render/Cloudflare
 app.disable('x-powered-by');
-app.use(helmet({ contentSecurityPolicy: { directives: { 'img-src': ["'self'", 'data:', 'https:'] } },
-                 crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' } }));   // janela de login das redes sociais
+// connect-src: o gráfico de cripto recebe os preços ao vivo direto da Binance (WebSocket público, sem chave)
+app.use(helmet({ contentSecurityPolicy: { directives: { 'img-src': ["'self'", 'data:', 'https:'],
+                   'connect-src': ["'self'", 'wss://stream.binance.com:9443', 'wss://data-stream.binance.vision'] } } }));
 app.use(cookieParser());
 const rawBody = (req: any, _res: unknown, buf: Buffer) => { req.rawBody = buf; };
-const jsonSmall = express.json({ limit: '1mb', verify: rawBody });
-const jsonLarge = express.json({ limit: '15mb' });                 // só para o PDF do onboarding
-const LARGE = new Set(['/api/client/dossier/ingest', '/api/client/media']);   // PDF do onboarding e fotos/logo
-app.use((req, res, next) => (LARGE.has(req.path) ? jsonLarge : jsonSmall)(req, res, next));
+app.use(express.json({ limit: '1mb', verify: rawBody }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));   // health check do Render
 
-// Artes públicas: o Instagram/Facebook buscam a imagem por este link. Só artes (nunca fotos ou logos enviados).
-app.get('/media/:id.jpg', async (req, res) => {
-  if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(404).end();
-  const m = (await servicePool.query('SELECT mime, bytes FROM media_public($1)', [req.params.id])).rows[0];
-  if (!m) return res.status(404).end();
-  res.set({ 'Cache-Control': 'public, max-age=31536000, immutable', 'Cross-Origin-Resource-Policy': 'cross-origin' }).type(m.mime).send(m.bytes);
-});
-
 app.use('/webhooks/pagamentos', webhookRouter);   // sem sessão; protegidos por assinatura
-app.use('/webhooks/whatsapp', waWebhookRouter);    // Meta (HMAC) e Twilio (assinatura)
-
-app.use('/oauth/meta', apiLimiter, metaCallbackRouter);   // retorno do login da Meta (sem sessão; state assinado)
-app.use('/oauth/google', apiLimiter, googleCallbackRouter);   // retorno do login do Google (idem)
-app.use('/oauth/tiktok', apiLimiter, tiktokCallbackRouter);   // retorno do login do TikTok (idem)
-app.use(tiktokVerifyRouter);                                    // arquivo de verificação de domínio do TikTok
 app.use('/api', apiLimiter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', requireAuth, adminRouter);
-app.use('/api/whatsapp', requireAuth, inboxRouter);
 
-app.use('/api/client', requireAuth, clientRouter);
-app.use('/api/approvals', requireAuth, approvalsRouter);
+// área do cliente: precisa de sessão de cliente (o administrador entra aqui só pelo "abrir painel do cliente")
+const requireTenant = (req: express.Request, res: express.Response, next: express.NextFunction) =>
+  req.user?.tid ? next() : res.status(403).json({ error: 'Área de clientes' });
+app.use('/api/market', requireAuth, requireTenant, marketRouter);
+app.use('/api/bots', requireAuth, requireTenant, botsRouter);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 
 // ---------- Painel React (build do Vite copiado para ./public no Docker) ----------
@@ -80,24 +61,23 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 app.listen(Number(process.env.PORT ?? 3000), () => {
   console.log('API no ar');
-  console.log(`[config] Login da agência: ${publicUrl()}${adminPath()}`);
-  if (adminPath() === '/admin') console.warn('[config] ADMIN_PATH não definida: o login da agência está no endereço padrão /admin. Defina um endereço secreto (ex.: /acesso-minha-agencia-7k2).');
+  console.log(`[config] Login do administrador: ${publicUrl()}${adminPath()}`);
+  if (adminPath() === '/admin') console.warn('[config] ADMIN_PATH não definida: o login do administrador está no endereço padrão /admin. Defina um endereço secreto (ex.: /acesso-painel-7k2).');
   // conferência de configuração: avisa no log do Render o que falta, em vez de falhar no meio de um login
   const enc = encryptionKeyStatus();
   if (!process.env.JWT_SECRET) console.warn('[config] JWT_SECRET não definida: ninguém consegue entrar. Defina em Environment.');
-  if (!enc.ok) console.warn(`[config] ${enc.detail}: o 2FA e as conexões com redes não funcionam.`);
+  if (!enc.ok) console.warn(`[config] ${enc.detail}: o 2FA e as conexões com corretoras não funcionam.`);
+  if (!process.env.BRAPI_TOKEN) console.warn('[config] BRAPI_TOKEN não definida: B3 e FIIs limitados aos ativos de teste da brapi.');
+  if (!process.env.ALPACA_DATA_KEY) console.warn('[config] ALPACA_DATA_KEY não definida: ações dos EUA desligadas.');
   else if (enc.source === 'jwt_secret') console.warn('[config] TOKEN_ENC_KEY não definida: usando chave derivada do JWT_SECRET. Funciona, mas não troque o JWT_SECRET depois.');
 });
 
-// Sem Background Worker (ex.: plano free do Render), a fila do WhatsApp e a IA rodam neste mesmo processo.
+// Sem Background Worker (ex.: plano free do Render), os robôs e o radar rodam neste mesmo processo.
 // Com um worker separado (node dist/workers.js), defina RUN_WORKERS_IN_WEB=0 no serviço web.
 if (process.env.RUN_WORKERS_IN_WEB !== '0' && (process.env.DATABASE_URL || process.env.DATABASE_URL_SERVICE)) {
-  const { runOutboxWorker } = await import('./whatsapp/outboxWorker.js');
-  const { runAiWorker } = await import('./whatsapp/aiAgent.js');
-  const { runPublisher } = await import('./integrations/meta/publish.js');
-  const { runAdsGuard } = await import('./integrations/meta/ads.js');
-  for (const [name, run] of [['fila WhatsApp', runOutboxWorker], ['IA WhatsApp', runAiWorker], ['publicador', runPublisher],
-                             ['vigia de verba', runAdsGuard]] as const) {
+  const { runBotEngine } = await import('./bots/engine.js');
+  const { runRadar } = await import('./market/radar.js');
+  for (const [name, run] of [['robôs', runBotEngine], ['radar', runRadar]] as const) {
     (async function loop() {
       for (;;) {
         try { await run(); } catch (e) { console.error(`[worker ${name}]`, (e as Error).message); }
@@ -105,5 +85,5 @@ if (process.env.RUN_WORKERS_IN_WEB !== '0' && (process.env.DATABASE_URL || proce
       }
     })();
   }
-  console.log('Workers rodando no mesmo processo da API');
+  console.log('Robôs e radar rodando no mesmo processo da API');
 }

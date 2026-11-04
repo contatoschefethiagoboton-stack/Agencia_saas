@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useRef, useState, type ReactNod
 import { api, ApiError } from '../api';
 
 /*
- * Ações críticas (saque, kill switch, modo pânico, chave PIX) exigem o 2FA de novo.
+ * Ações críticas (dinheiro real, corretora, kill switch, modo pânico) exigem o 2FA de novo.
  * `guard(fn)` executa a ação; se o servidor pedir step-up, abre o diálogo do código e repete.
  */
 type Guard = <T>(fn: () => Promise<T>) => Promise<T>;

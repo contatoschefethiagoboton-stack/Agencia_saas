@@ -36,3 +36,7 @@ export const withService = <T>(fn: Fn<T>) => tx(servicePool, async () => {}, fn)
 /** Painel Master — só chamado depois de requireAdmin. Enxerga todos os tenants (política admin_bypass). */
 export const withAdmin = <T>(fn: Fn<T>) =>
   tx(adminPool, c => c.query("SELECT set_config('app.bypass_rls', 'on', true)").then(() => {}), fn);
+
+/** Workers da plataforma (robôs, radar): enxergam todos os tenants. Nunca chamado a partir de rota de cliente. */
+export const withSystem = <T>(fn: Fn<T>) =>
+  tx(servicePool, c => c.query("SELECT set_config('app.bypass_rls', 'on', true)").then(() => {}), fn);

@@ -4,8 +4,8 @@ import { useLoad } from '../ui/useLoad';
 import { useStepUp } from '../auth/StepUp';
 
 interface Tenant { id: string; name: string; niche: string | null; city: string | null; plan: string; status: string;
-  suspended_reason: string | null; owner_email: string | null; cobranca_ativa: boolean; wa_ativos: number; wa_qualidade: string | null;
-  conexoes_atencao: number; vip: boolean; vip_note: string | null; signup: 'admin' | 'self'; ultimo_acesso: string | null }
+  suspended_reason: string | null; owner_email: string | null; cobranca_ativa: boolean; robos_ativos: number; robos_reais: number;
+  corretoras: number; vip: boolean; vip_note: string | null; signup: 'admin' | 'self'; ultimo_acesso: string | null }
 interface Plan { id: string; name: string; price_cents: string }
 
 const statusBadge = (t: Tenant) => t.status === 'pending' ? <span className="badge warn">Aguardando sua aprovação</span>
@@ -35,7 +35,7 @@ export default function Clientes() {
                (r.billing?.error ? ` Cobrança não iniciada: ${r.billing.error}` : r.billing ? ' Assinatura criada no Asaas.' : ''),
             secret: r.tempPassword }));
 
-  /** Entra no painel do negócio (dossiê, calendário, artes, anúncios, conexões) sem a senha do cliente. */
+  /** Entra no painel do cliente (robôs, corretoras, avisos) para dar suporte, sem a senha dele. */
   const openPanel = async (t: Tenant) => {
     setMsg(null);
     try { await guard(() => api(`/admin/tenants/${t.id}/impersonate`, { body: {} })); location.hash = '#cliente'; location.reload(); }
@@ -45,7 +45,7 @@ export default function Clientes() {
   const kill = (t: Tenant) => {
     const reason = prompt(`Motivo do bloqueio de "${t.name}" (fica na auditoria):`);
     if (!reason || reason.trim().length < 5) return;
-    act(() => api(`/admin/tenants/${t.id}/kill`, { body: { reason } }), () => ({ text: `${t.name} bloqueado (kill switch): sessões derrubadas, WhatsApp e anúncios pausados.` }));
+    act(() => api(`/admin/tenants/${t.id}/kill`, { body: { reason } }), () => ({ text: `${t.name} bloqueado (kill switch): sessões derrubadas e robôs pausados.` }));
   };
 
   return (
@@ -58,7 +58,7 @@ export default function Clientes() {
         {error && <p className="msg err">{error}</p>}
         {list && (list.length ? (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>Negócio</th><th>Plano</th><th>Situação</th><th>WhatsApp</th><th>Responsável</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Cliente</th><th>Plano</th><th>Situação</th><th>Robôs</th><th>Responsável</th><th>Ações</th></tr></thead>
             <tbody>{list.map(t => (
               <tr key={t.id}>
                 <td><b>{t.name}</b>{t.vip && <span className="badge" title={`VIP (só você vê)${t.vip_note ? ': ' + t.vip_note : ''}`}
@@ -70,8 +70,9 @@ export default function Clientes() {
                             style={{ background: 'var(--card-2)', border: '1px solid var(--border)', borderRadius: 8, padding: 6 }}>
                   {plans?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
                   <div className="card-sub">{t.cobranca_ativa ? 'cobrança ativa' : 'sem cobrança'}</div></td>
-                <td>{statusBadge(t)}{t.conexoes_atencao > 0 && <div><span className="badge warn">{t.conexoes_atencao} conexão(ões) para reconectar</span></div>}</td>
-                <td>{t.wa_ativos ? <span className={`badge ${t.wa_qualidade === 'RED' ? 'bad' : t.wa_qualidade === 'YELLOW' ? 'warn' : 'good'}`}>{t.wa_ativos} ativo(s)</span> : <span className="card-sub">—</span>}</td>
+                <td>{statusBadge(t)}</td>
+                <td>{t.robos_ativos ? <span className={`badge ${t.robos_reais ? 'warn' : 'good'}`}>{t.robos_ativos} ligado(s){t.robos_reais ? ` · ${t.robos_reais} real` : ''}</span> : <span className="card-sub">—</span>}
+                  <div className="card-sub">{t.corretoras} corretora(s)</div></td>
                 <td className="mono">{t.owner_email}</td>
                 <td><div className="actions">
                   {t.status === 'pending' && <>
@@ -81,7 +82,7 @@ export default function Clientes() {
                   </>}
                   {t.status === 'rejected' && <button className="btn" onClick={() => act(() => api(`/admin/tenants/${t.id}/approve`, { body: {} }), () => ({ text: `${t.name} aprovado.` }))}>Aprovar mesmo assim</button>}
                   <a className="btn" href={`#master-seguranca?tenant=${t.id}`}>Atividade</a>
-                  <button className="btn" title="Só você vê. VIP: sem cobrança, sem teto de IA e com os recursos do maior plano."
+                  <button className="btn" title="Só você vê. VIP: sem cobrança e com os recursos do maior plano."
                           onClick={() => { const note = t.vip ? undefined : (prompt('Anotação interna do VIP (opcional, só você vê):') ?? undefined);
                             act(() => api(`/admin/tenants/${t.id}`, { method: 'PATCH', body: { vip: !t.vip, vipNote: note } }),
                                 () => ({ text: t.vip ? `${t.name} deixou de ser VIP.` : `${t.name} agora é VIP (o cliente não vê isso).` })); }}>
@@ -104,15 +105,14 @@ export default function Clientes() {
       <form className="card" onSubmit={e => { e.preventDefault(); create(); }}>
         <h2>Cadastrar cliente</h2>
         <div className="form-grid">
-          <label className="field">Nome do negócio<input required value={f.name} onChange={set('name')} /></label>
-          <label className="field">Nicho<input placeholder="padaria, clínica, barbearia, influenciador…" value={f.niche} onChange={set('niche')} /></label>
-          <label className="field">Cidade / bairro<input value={f.city} onChange={set('city')} /></label>
+          <label className="field">Nome da conta<input required value={f.name} onChange={set('name')} placeholder="ex.: Maria Silva" /></label>
+          <label className="field">Cidade<input value={f.city} onChange={set('city')} /></label>
           <label className="field">CPF/CNPJ<input value={f.document} onChange={set('document')} /><small>Obrigatório para cobrar</small></label>
           <label className="field">Plano<select value={f.plan} onChange={set('plan')}>
             {plans?.map(p => <option key={p.id} value={p.id}>{p.name} · {(Number(p.price_cents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</option>)}</select></label>
           <label className="field">Nome do responsável<input required value={f.ownerName} onChange={set('ownerName')} /></label>
           <label className="field">E-mail do responsável<input type="email" required value={f.ownerEmail} onChange={set('ownerEmail')} /></label>
-          <label className="field">WhatsApp do responsável<input placeholder="+5519999999999" pattern="\+\d{10,15}" value={f.ownerPhone} onChange={set('ownerPhone')} /></label>
+          <label className="field">Celular do responsável<input placeholder="+5519999999999" pattern="\+\d{10,15}" value={f.ownerPhone} onChange={set('ownerPhone')} /></label>
         </div>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
           <input type="checkbox" checked={f.startBilling} onChange={set('startBilling')} /> Já criar a assinatura (e o setup) no Asaas
