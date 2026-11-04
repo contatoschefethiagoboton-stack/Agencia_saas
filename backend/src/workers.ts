@@ -4,6 +4,6 @@
  */
 import 'express-async-errors';
 import { runBotEngine } from './bots/engine.js';
-import { runRadar } from './market/radar.js';
+import { runRadar, runPriceAlerts } from './market/radar.js';
 
-await Promise.all([runBotEngine(), runRadar()]);
+await Promise.all([runBotEngine(), runRadar(), runPriceAlerts()]);

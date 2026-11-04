@@ -12,8 +12,9 @@ export async function notify(tenantId: string | null, kind: AlertKind, title: st
     await c.query(`INSERT INTO alerts (tenant_id, kind, title, body, market, symbol) VALUES ($1, $2, $3, $4, $5, $6)`,
                   [tenantId, kind, title, body ?? null, market ?? null, symbol ?? null]);
     if (!process.env.TELEGRAM_BOT_TOKEN) return [];
-    return (await c.query(`SELECT telegram_chat_id FROM notify_settings
-                            WHERE telegram_chat_id IS NOT NULL AND ${PREF[kind]} AND ($1::uuid IS NULL OR tenant_id = $1)`, [tenantId])).rows
+    return (await c.query(`SELECT n.telegram_chat_id FROM notify_settings n JOIN tenants t ON t.id = n.tenant_id JOIN plans p ON p.id = t.plan
+                            WHERE n.telegram_chat_id IS NOT NULL AND n.${PREF[kind]} AND ($1::uuid IS NULL OR n.tenant_id = $1)
+                              AND t.status = 'active' AND (p.telegram OR t.vip)`, [tenantId])).rows
       .map(r => r.telegram_chat_id as string);
   });
   for (const chat of chats) void sendTelegram(chat, `<b>${esc(title)}</b>${body ? `\n${esc(body)}` : ''}`).catch(() => {});

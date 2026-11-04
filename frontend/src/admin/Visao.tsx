@@ -3,7 +3,9 @@ import { useLoad } from '../ui/useLoad';
 
 interface Dashboard {
   mrrCents: string;
-  clientes: { ativos: number; bloqueados: number; aguardando: number; vip: number };
+  clientes: { ativos: number; bloqueados: number; aguardando: number; aguardando_pagamento: number; vip: number };
+  planos: { name: string; clientes: number; receita_cents: string }[];
+  seguranca: { senhas_erradas: number; ips_bloqueados: number; pagamentos_suspeitos: number; carteira_alertas: number };
   robos: { ativos: number; reais: number; com_erro: number; seguidores: number; masters: number };
   ops: { ops_24h: number; abertas: number; abertas_reais: number };
   conexoes: { total: number; com_erro: number };
@@ -33,6 +35,24 @@ export default function Visao() {
         </section>)}
       <section className="grid-kpi" aria-label="Indicadores principais">
         {kpis.map(([label, value]) => <article key={label} className="card kpi"><span className="kpi-label">{label}</span><div className="kpi-value"><b>{value}</b></div></article>)}
+      </section>
+      <section className="row">
+        <article className="card half">
+          <h2>Planos</h2>
+          <div className="table-wrap"><table className="tbl"><thead><tr><th>Plano</th><th className="n">Clientes</th><th className="n">Receita/mês</th></tr></thead>
+            <tbody>{d.planos.map(p => <tr key={p.name}><td>{p.name}</td><td className="n">{p.clientes}</td><td className="n">{brl(p.receita_cents)}</td></tr>)}</tbody></table></div>
+          <span className="card-sub">{d.clientes.aguardando_pagamento} cadastro(s) aguardando pagamento · {d.clientes.vip} VIP</span>
+        </article>
+        <article className="card half">
+          <h2>Segurança nas últimas 24h</h2>
+          <div className="tiles">
+            <div className="tile"><span>Senhas erradas</span><b>{d.seguranca.senhas_erradas}</b></div>
+            <div className="tile"><span>IPs bloqueados</span><b className={d.seguranca.ips_bloqueados ? 'down' : ''}>{d.seguranca.ips_bloqueados}</b></div>
+            <div className="tile"><span>Pagamentos suspeitos</span><b className={d.seguranca.pagamentos_suspeitos ? 'down' : ''}>{d.seguranca.pagamentos_suspeitos}</b></div>
+            <div className="tile"><span>Alertas de carteira</span><b className={d.seguranca.carteira_alertas ? 'down' : ''}>{d.seguranca.carteira_alertas}</b></div>
+          </div>
+          <a className="btn" href="#master-rastreamento">Ver rastreamento</a>
+        </article>
       </section>
       <section className="row">
         <article className="card half">

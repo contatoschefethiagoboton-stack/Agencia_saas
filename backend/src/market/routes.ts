@@ -7,6 +7,7 @@ import { computeAll } from './indicators.js';
 import { analyze, backtest, STRATEGIES } from './strategies.js';
 import { fiiRanking, getCandles, getQuotes, INTERVALS, isDemo, normalizeSymbol, topAssets, type Market } from './data.js';
 import { scan } from './radar.js';
+import { planOf } from '../bots/routes.js';
 
 export const marketRouter = Router();
 const tid = (req: any) => req.user!.tid as string;
@@ -147,5 +148,35 @@ marketRouter.post('/notify/test', async (req, res) => {
   const chat = await withTenant(tid(req), async c => (await c.query(`SELECT telegram_chat_id FROM notify_settings`)).rows[0]?.telegram_chat_id);
   if (!chat) return res.status(400).json({ error: 'Salve o código do chat do Telegram antes de testar' });
   await sendTelegram(chat, '<b>Tudo certo!</b>\nVocê vai receber aqui os avisos de sinais, robôs e lançamentos.');
+  res.json({ ok: true });
+});
+
+// ---------- Alertas de preço ("me avise quando BTC passar de 70 mil" / "quando cair 5%") ----------
+marketRouter.get('/price-alerts', async (req, res) => {
+  res.json(await withTenant(tid(req), async c => (await c.query(
+    `SELECT id, market, symbol, kind, value::float, base_price::float, note, active, triggered_at, triggered_price::float, created_at
+       FROM price_alerts ORDER BY active DESC, created_at DESC LIMIT 200`)).rows));
+});
+
+marketRouter.post('/price-alerts', async (req, res) => {
+  const b = z.object({ market: zMarket, symbol: z.string().max(20), kind: z.enum(['above', 'below', 'up_pct', 'down_pct']),
+                       value: z.number().positive().max(1e12), note: z.string().trim().max(120).optional() }).parse(req.body);
+  const symbol = normalizeSymbol(b.market, b.symbol);
+  if (b.kind.endsWith('pct') && b.value > 500) return res.status(400).json({ error: 'Percentual muito alto' });
+  const q = (await getQuotes(b.market, [symbol]))[0] ?? { price: (await getCandles(b.market, symbol, '1h', 50)).at(-1)!.close };
+  const id = await withTenant(tid(req), async c => {
+    const plan = await planOf(c, tid(req));
+    const n = (await c.query(`SELECT count(*)::int AS n FROM price_alerts WHERE active`)).rows[0].n;
+    if (plan.price_alerts >= 0 && n >= plan.price_alerts)
+      throw Object.assign(new Error(`Seu plano permite ${plan.price_alerts} alerta(s) de preço ativos. Apague um ou mude de plano.`), { status: 403 });
+    return (await c.query(`INSERT INTO price_alerts (tenant_id, market, symbol, kind, value, base_price, note) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                          [tid(req), b.market, symbol, b.kind, b.value, q.price, b.note ?? null])).rows[0].id;
+  });
+  res.status(201).json({ id, basePrice: q.price });
+});
+
+marketRouter.delete('/price-alerts/:id', async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  await withTenant(tid(req), c => c.query(`DELETE FROM price_alerts WHERE id = $1`, [id]));
   res.json({ ok: true });
 });

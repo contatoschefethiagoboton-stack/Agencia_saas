@@ -11,7 +11,7 @@ function client() { let cookie = '';
     return { s: r.status, j: await r.json().catch(() => ({})) }; }; }
 const ok = (c, l, x) => { console.log(c ? 'OK  ' : 'FAIL', l, c ? '' : JSON.stringify(x)?.slice(0, 400)); if (!c) process.exitCode = 1; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const mails = () => fs.existsSync(process.env.MAIL_OUTBOX_FILE) ? fs.readFileSync(process.env.MAIL_OUTBOX_FILE, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)) : [];
+const mails = () => fs.existsSync(process.env.MAIL_OUTBOX_FILE) ? fs.readFileSync(process.env.MAIL_OUTBOX_FILE, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(m => !/Novo acesso/.test(m.subject)) : [];   // ignora o aviso de aparelho novo
 const tokenOf = m => m.text.match(/#redefinir\?token=([A-Za-z0-9_-]+)/)[1];
 const waitMails = async n => { for (let i = 0; i < 20 && mails().length < n; i++) await sleep(150); return mails(); };
 const nextWindow = () => sleep(31000 - (Date.now() % 30000));
@@ -20,7 +20,7 @@ const adm = client();
 let r = await adm('/auth/login', { area: 'admin', email: 'dono@agencia.com', password: 'SenhaForte123' });
 const admSecret = r.j.secret;
 await adm('/auth/login/verify', { ticket: r.j.ticket, code: code(admSecret) });
-const t = (await adm('/admin/tenants', { name: 'Padaria Bom Grão', plan: 'starter', ownerName: 'Maria Silva', ownerEmail: 'maria@bomgrao.com' })).j;
+const t = (await adm('/admin/tenants', { name: 'Padaria Bom Grão', plan: 'basico', ownerName: 'Maria Silva', ownerEmail: 'maria@bomgrao.com' })).j;
 const cli = client();
 r = await cli('/auth/login', { email: 'maria@bomgrao.com', password: t.tempPassword });
 const mSecret = r.j.secret;

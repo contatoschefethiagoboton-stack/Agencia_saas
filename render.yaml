@@ -67,8 +67,12 @@ services:
         sync: false
       - key: TELEGRAM_BOT_NAME      # nome do bot sem @ (aparece para o cliente em Avisos)
         sync: false
-      - key: ASAAS_API_KEY
+      - key: ASAAS_API_KEY          # cobrança dos planos (PIX/cartão) e carteiras (subcontas)
         sync: false
+      - key: WALLET_TX_MAX_CENTS    # limite por saída de dinheiro da carteira (R$ 5.000)
+        value: "500000"
+      - key: WALLET_DAILY_MAX_CENTS # limite diário de saídas por cliente (R$ 10.000)
+        value: "1000000"
       - key: ASAAS_WEBHOOK_TOKEN
         sync: false
       - key: MP_ACCESS_TOKEN

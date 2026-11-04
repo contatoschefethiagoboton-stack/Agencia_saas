@@ -73,3 +73,10 @@ a.feed-item[href]:hover { background: var(--track); color: var(--text); }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .disclaimer { margin: 8px 0 0; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 16px; line-height: 1.5; }
 a.btn[aria-disabled="true"] { opacity: .55; pointer-events: none; }
+.plan-pick { display: grid; gap: 8px; }
+.plan-opt { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; text-align: left; padding: 12px 14px; border-radius: 12px; cursor: pointer;
+  background: var(--card-2); border: 1px solid var(--border-strong); color: var(--text); }
+.plan-opt small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.plan-opt[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(108 140 255 / .2); }
+.plan-price { font-weight: 800; } .plan-price small { display: inline; font-weight: 500; }
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }

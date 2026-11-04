@@ -11,6 +11,9 @@ import { requireAuth } from './middleware/auth.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { marketRouter } from './market/routes.js';
 import { botsRouter } from './bots/routes.js';
+import { accountRouter } from './account/routes.js';
+import { walletRouter } from './wallet/routes.js';
+import { accessLog, ipGuard } from './security/guard.js';
 import { encryptionKeyStatus } from './security/vault.js';
 import { adminPath, publicUrl } from './config.js';
 
@@ -27,7 +30,7 @@ app.use(express.json({ limit: '1mb', verify: rawBody }));
 app.get('/healthz', (_req, res) => res.json({ ok: true }));   // health check do Render
 
 app.use('/webhooks/pagamentos', webhookRouter);   // sem sessão; protegidos por assinatura
-app.use('/api', apiLimiter);
+app.use('/api', ipGuard, apiLimiter, accessLog);   // IP bloqueado não passa; toda chamada com sessão é rastreada
 app.use('/api/auth', authRouter);
 app.use('/api/admin', requireAuth, adminRouter);
 
@@ -36,6 +39,8 @@ const requireTenant = (req: express.Request, res: express.Response, next: expres
   req.user?.tid ? next() : res.status(403).json({ error: 'Área de clientes' });
 app.use('/api/market', requireAuth, requireTenant, marketRouter);
 app.use('/api/bots', requireAuth, requireTenant, botsRouter);
+app.use('/api/account', requireAuth, requireTenant, accountRouter);
+app.use('/api/wallet', requireAuth, requireTenant, walletRouter);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
 
 // ---------- Painel React (build do Vite copiado para ./public no Docker) ----------
@@ -76,8 +81,8 @@ app.listen(Number(process.env.PORT ?? 3000), () => {
 // Com um worker separado (node dist/workers.js), defina RUN_WORKERS_IN_WEB=0 no serviço web.
 if (process.env.RUN_WORKERS_IN_WEB !== '0' && (process.env.DATABASE_URL || process.env.DATABASE_URL_SERVICE)) {
   const { runBotEngine } = await import('./bots/engine.js');
-  const { runRadar } = await import('./market/radar.js');
-  for (const [name, run] of [['robôs', runBotEngine], ['radar', runRadar]] as const) {
+  const { runRadar, runPriceAlerts } = await import('./market/radar.js');
+  for (const [name, run] of [['robôs', runBotEngine], ['radar', runRadar], ['alertas de preço', runPriceAlerts]] as const) {
     (async function loop() {
       for (;;) {
         try { await run(); } catch (e) { console.error(`[worker ${name}]`, (e as Error).message); }

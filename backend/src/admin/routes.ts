@@ -8,7 +8,8 @@ import crypto from 'node:crypto';
 import argon2 from 'argon2';
 import { audit } from '../audit/audit.js';
 import { redis } from '../redis.js';
-import { createCharge, createSubscription } from '../finance/billing.js';
+import { cancelSubscription, createCharge, createSubscription } from '../finance/billing.js';
+import { blockedIps, unblockIp } from '../security/guard.js';
 import { panicInfo, setPanic } from '../security/panic.js';
 import { setSession } from '../auth/session.js';
 import { mailReady, sendMail } from '../mail.js';
@@ -16,6 +17,14 @@ import { publicUrl } from '../config.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAdmin);
+/** A conta de investimentos do próprio administrador não pode ser bloqueada, excluída nem aberta como cliente. */
+adminRouter.param('id', async (req, res, next, id) => {
+  if (/^\/tenants\//.test(req.path) && /^[0-9a-f-]{36}$/i.test(id)) {
+    const t = (await withAdmin(c => c.query(`SELECT is_platform FROM tenants WHERE id = $1`, [id]))).rows[0];
+    if (t?.is_platform) return res.status(403).json({ error: 'Esta é a sua própria conta' });
+  }
+  next();
+});
 
 // ---------- Visão geral ----------
 adminRouter.get('/dashboard', async (_req, res) => {
@@ -26,7 +35,16 @@ adminRouter.get('/dashboard', async (_req, res) => {
     const clientes = (await c.query(`SELECT count(*) FILTER (WHERE status = 'active')::int AS ativos,
                                             count(*) FILTER (WHERE status IN ('suspended', 'killed'))::int AS bloqueados,
                                             count(*) FILTER (WHERE status = 'pending')::int AS aguardando,
-                                            count(*) FILTER (WHERE vip)::int AS vip FROM tenants`)).rows[0];
+                                            count(*) FILTER (WHERE status = 'awaiting_payment')::int AS aguardando_pagamento,
+                                            count(*) FILTER (WHERE vip)::int AS vip FROM tenants WHERE NOT is_platform AND status <> 'deleted'`)).rows[0];
+    const planos = (await c.query(`SELECT p.name, count(t.id)::int AS clientes, (count(t.id) FILTER (WHERE t.status = 'active' AND NOT t.vip) * p.price_cents)::text AS receita_cents
+                                     FROM plans p LEFT JOIN tenants t ON t.plan = p.id AND NOT t.is_platform AND t.status NOT IN ('deleted', 'rejected')
+                                    WHERE p.active GROUP BY p.id ORDER BY p.price_cents`)).rows;
+    const seguranca = (await c.query(`SELECT count(*) FILTER (WHERE action = 'auth.login_failed')::int AS senhas_erradas,
+                                             count(*) FILTER (WHERE action = 'security.ip_blocked')::int AS ips_bloqueados,
+                                             count(*) FILTER (WHERE action IN ('payment.amount_mismatch', 'payment.chargeback'))::int AS pagamentos_suspeitos,
+                                             count(*) FILTER (WHERE action LIKE 'wallet.blocked%' OR action = 'wallet.code_failed')::int AS carteira_alertas
+                                        FROM audit_log WHERE at > now() - interval '24 hours'`)).rows[0];
     const robos = (await c.query(`SELECT count(*) FILTER (WHERE status = 'active' AND NOT is_master)::int AS ativos,
                                          count(*) FILTER (WHERE status = 'active' AND mode = 'live')::int AS reais,
                                          count(*) FILTER (WHERE status = 'error')::int AS com_erro,
@@ -38,7 +56,7 @@ adminRouter.get('/dashboard', async (_req, res) => {
     const conexoes = (await c.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE status = 'error')::int AS com_erro FROM broker_connections`)).rows[0];
     const erros = (await c.query(`SELECT b.name, b.symbol, b.status_reason, t.name AS cliente FROM bots b LEFT JOIN tenants t ON t.id = b.tenant_id
                                   WHERE b.status = 'error' ORDER BY b.last_tick_at DESC NULLS LAST LIMIT 10`)).rows;
-    return { mrrCents: mrr, clientes, robos, ops, conexoes, erros };
+    return { mrrCents: mrr, clientes, robos, ops, conexoes, erros, planos, seguranca };
   }));
 });
 
@@ -60,7 +78,8 @@ adminRouter.post('/tenants/:id/kill', requireRecentMfa, async (req, res) => {
 // ---------- Clientes (tenants) ----------
 adminRouter.get('/tenants', async (_req, res) => {
   res.json(await withAdmin(async c => (await c.query(`
-    SELECT t.id, t.name, t.slug, t.niche, t.city, t.plan, t.status, t.suspended_reason, t.created_at,
+    SELECT t.id, t.name, t.slug, t.niche, t.city, t.plan, t.status, t.suspended_reason, t.created_at, t.document, t.billing_type, t.deleted_at,
+           (SELECT status FROM wallet_accounts w WHERE w.tenant_id = t.id) AS carteira,
            t.vip, t.vip_note, t.signup,
            (SELECT max(a.at) FROM audit_log a WHERE a.tenant_id = t.id AND a.action = 'auth.login_ok') AS ultimo_acesso,
            t.asaas_subscription_id IS NOT NULL AS cobranca_ativa,
@@ -68,7 +87,8 @@ adminRouter.get('/tenants', async (_req, res) => {
            (SELECT count(*)::int FROM bots b WHERE b.tenant_id = t.id AND b.status = 'active') AS robos_ativos,
            (SELECT count(*)::int FROM bots b WHERE b.tenant_id = t.id AND b.status = 'active' AND b.mode = 'live') AS robos_reais,
            (SELECT count(*)::int FROM broker_connections bc WHERE bc.tenant_id = t.id) AS corretoras
-      FROM tenants t ORDER BY (t.status = 'pending') DESC, t.created_at DESC`)).rows));
+      FROM tenants t WHERE NOT t.is_platform AND ($1 OR t.status <> 'deleted')
+     ORDER BY (t.status IN ('pending', 'awaiting_payment')) DESC, t.created_at DESC`, [_req.query.excluidos === '1'])).rows));
 });
 
 const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -198,8 +218,10 @@ adminRouter.put('/plans/:id', async (req, res) => {
 });
 
 // ---------- Central de Auditoria e Segurança ----------
-const SECURITY_ACTIONS = ['auth.login_failed', 'auth.mfa_failed', 'auth.step_up_failed', 'auth.new_device',
-  'webhook.rejected', 'payment.amount_mismatch', 'payment.chargeback', 'tenant.killed', 'security.panic_on', 'security.panic_off'];
+const SECURITY_ACTIONS = ['auth.login_failed', 'auth.mfa_failed', 'auth.step_up_failed', 'auth.new_device', 'security.ip_blocked',
+  'security.signup_bot', 'security.signup_duplicate_cpf', 'webhook.rejected', 'payment.amount_mismatch', 'payment.chargeback',
+  'wallet.code_failed', 'wallet.blocked_velocity', 'wallet.blocked_admin', 'wallet.payout_key_added', 'wallet.withdraw',
+  'tenant.killed', 'tenant.deleted', 'security.panic_on', 'security.panic_off'];
 
 adminRouter.get('/audit', async (req, res) => {
   const q = z.object({ tenantId: z.string().uuid().optional(), action: z.string().max(60).optional(),
@@ -268,7 +290,7 @@ adminRouter.post('/tenants/:id/approve', async (req, res) => {
   const id = z.string().uuid().parse(req.params.id);
   const owner = await withAdmin(async c => {
     const r = await c.query(`UPDATE tenants SET status = 'active', decided_at = now(), decided_by = $2
-                             WHERE id = $1 AND status IN ('pending', 'rejected') RETURNING name`, [id, req.user!.sub]);
+                             WHERE id = $1 AND status IN ('pending', 'rejected', 'awaiting_payment') RETURNING name`, [id, req.user!.sub]);
     if (!r.rowCount) throw Object.assign(new Error('Este cadastro não está aguardando aprovação'), { status: 409 });
     await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.approved' }, c);
     const o = (await c.query(`SELECT email, name FROM users WHERE tenant_id = $1 AND role = 'owner' LIMIT 1`, [id])).rows[0];
@@ -286,7 +308,7 @@ adminRouter.post('/tenants/:id/reject', async (req, res) => {
   const reason = z.string().trim().max(300).optional().parse(req.body?.reason);
   await withAdmin(async c => {
     const r = await c.query(`UPDATE tenants SET status = 'rejected', decided_at = now(), decided_by = $2, suspended_reason = $3
-                             WHERE id = $1 AND status = 'pending'`, [id, req.user!.sub, reason ?? null]);
+                             WHERE id = $1 AND status IN ('pending', 'awaiting_payment')`, [id, req.user!.sub, reason ?? null]);
     if (!r.rowCount) throw Object.assign(new Error('Este cadastro não está aguardando aprovação'), { status: 409 });
     await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.rejected', meta: { reason } }, c);
   });
@@ -342,6 +364,86 @@ adminRouter.delete('/masters/:id', async (req, res) => {
     await c.query(`UPDATE bots SET status = 'paused', status_reason = 'A estratégia copiada foi encerrada pela plataforma' WHERE copy_of = $1`, [id]);
     await c.query(`DELETE FROM bots WHERE id = $1 AND is_master`, [id]);
     await audit({ actorId: req.user!.sub, ip: req.ip, action: 'master.deleted', target: id }, c);
+  });
+  res.json({ ok: true });
+});
+
+// ---------- Excluir cliente: apaga o login e os dados de acesso; o histórico fica na auditoria ----------
+adminRouter.post('/tenants/:id/delete', requireRecentMfa, async (req, res) => {
+  const id = z.string().uuid().parse(req.params.id);
+  const confirmName = z.string().trim().min(1).parse(req.body?.confirmName);
+  const out = await withAdmin(async c => {
+    const t = (await c.query(`SELECT name, status, asaas_subscription_id FROM tenants WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+    if (!t || t.status === 'deleted') throw Object.assign(new Error('Cliente não encontrado'), { status: 404 });
+    if (t.name.trim().toLowerCase() !== confirmName.toLowerCase()) throw Object.assign(new Error('Digite o nome do cliente exatamente para confirmar'), { status: 400 });
+    if ((await c.query(`SELECT 1 FROM bot_trades WHERE tenant_id = $1 AND status = 'open' AND mode = 'live'`, [id])).rowCount)
+      throw Object.assign(new Error('O cliente tem posição com dinheiro real aberta. Feche as posições antes de excluir.'), { status: 409 });
+    if ((await c.query(`SELECT 1 FROM wallet_accounts WHERE tenant_id = $1 AND status <> 'blocked'`, [id])).rowCount)
+      throw Object.assign(new Error('O cliente tem carteira aberta. Peça o saque do saldo e bloqueie a carteira antes de excluir.'), { status: 409 });
+    const users = (await c.query(
+      `UPDATE users SET email = 'excluido+' || id || '@removido.invalid', password_hash = 'excluido', phone_e164 = NULL, totp_enabled = false,
+              totp_secret_cipher = NULL, token_version = token_version + 1, locked_until = 'infinity'
+        WHERE tenant_id = $1 RETURNING id`, [id])).rows;
+    await c.query(`DELETE FROM bots WHERE tenant_id = $1`, [id]);
+    for (const tbl of ['broker_connections', 'watchlist', 'price_alerts', 'notify_settings', 'alert_reads'])
+      await c.query(`DELETE FROM ${tbl} WHERE tenant_id = $1`, [id]);
+    await c.query(`UPDATE tenants SET status = 'deleted', deleted_at = now(), suspended_reason = 'excluido' WHERE id = $1`, [id]);
+    await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: 'tenant.deleted', meta: { name: t.name } }, c);
+    return { users, sub: t.asaas_subscription_id };
+  });
+  await Promise.all(out.users.map((u: any) => redis.del(`authstate:${u.id}`)));      // derruba a sessão na hora
+  let cobranca = 'sem assinatura';
+  if (out.sub) cobranca = await cancelSubscription(out.sub).then(() => 'assinatura cancelada no Asaas', e => `cancele a assinatura no Asaas: ${(e as Error).message}`);
+  res.json({ ok: true, cobranca });
+});
+
+// ---------- Rastreamento: toda chamada feita com sessão (quem, de onde, o quê) ----------
+adminRouter.get('/access-log', async (req, res) => {
+  const q = z.object({ tenantId: z.string().uuid().optional(), ip: z.string().max(45).optional(), before: z.coerce.number().int().optional(),
+                       path: z.string().max(60).optional() }).parse(req.query);
+  res.json(await withAdmin(async c => (await c.query(`
+    SELECT a.id, a.at, a.method, a.path, a.status, a.ms, host(a.ip) AS ip, a.ua, a.impersonating, u.email, t.name AS cliente
+      FROM access_log a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN tenants t ON t.id = a.tenant_id
+     WHERE ($1::uuid IS NULL OR a.tenant_id = $1) AND ($2::text IS NULL OR host(a.ip) = $2)
+       AND ($3::bigint IS NULL OR a.id < $3) AND ($4::text IS NULL OR a.path LIKE '%' || $4 || '%')
+     ORDER BY a.id DESC LIMIT 150`, [q.tenantId ?? null, q.ip ?? null, q.before ?? null, q.path ?? null])).rows));
+});
+
+adminRouter.get('/access-summary', async (_req, res) => {
+  res.json(await withAdmin(async c => ({
+    online: (await c.query(`SELECT count(DISTINCT user_id)::int AS n FROM access_log WHERE at > now() - interval '15 minutes'`)).rows[0].n,
+    chamadas24h: (await c.query(`SELECT count(*)::int AS n FROM access_log WHERE at > now() - interval '24 hours'`)).rows[0].n,
+    erros24h: (await c.query(`SELECT count(*)::int AS n FROM access_log WHERE at > now() - interval '24 hours' AND status >= 400`)).rows[0].n,
+    ipsPorUsuario: (await c.query(`SELECT u.email, count(DISTINCT a.ip)::int AS ips FROM access_log a JOIN users u ON u.id = a.user_id
+                                    WHERE a.at > now() - interval '24 hours' GROUP BY u.email HAVING count(DISTINCT a.ip) > 2 ORDER BY 2 DESC LIMIT 10`)).rows,
+  })));
+});
+
+adminRouter.get('/security/blocked-ips', async (_req, res) => res.json(await blockedIps()));
+adminRouter.delete('/security/blocked-ips/:ip', async (req, res) => {
+  const ip = z.string().max(45).parse(req.params.ip);
+  await unblockIp(ip);
+  await audit({ actorId: req.user!.sub, ip: req.ip, action: 'security.ip_unblocked', target: ip });
+  res.json({ ok: true });
+});
+
+// ---------- Carteiras dos clientes ----------
+adminRouter.get('/wallets', async (_req, res) => {
+  res.json(await withAdmin(async c => (await c.query(`
+    SELECT w.tenant_id, t.name, w.status, w.blocked_reason, w.created_at,
+           (SELECT coalesce(sum(amount_cents), 0)::int FROM wallet_txs x WHERE x.tenant_id = w.tenant_id AND x.kind IN ('saque', 'envio') AND x.status = 'done' AND x.created_at > now() - interval '24 hours') AS saidas_24h,
+           (SELECT count(*)::int FROM wallet_txs x WHERE x.tenant_id = w.tenant_id AND x.status = 'failed' AND x.created_at > now() - interval '24 hours') AS falhas_24h
+      FROM wallet_accounts w JOIN tenants t ON t.id = w.tenant_id ORDER BY w.status = 'blocked' DESC, w.created_at DESC`)).rows));
+});
+
+adminRouter.post('/wallets/:tenantId/block', requireRecentMfa, async (req, res) => {
+  const id = z.string().uuid().parse(req.params.tenantId);
+  const b = z.object({ block: z.boolean(), reason: z.string().trim().max(200).optional() }).parse(req.body);
+  await withAdmin(async c => {
+    const r = await c.query(`UPDATE wallet_accounts SET status = $2, blocked_reason = $3 WHERE tenant_id = $1 AND status <> 'pending'`,
+                            [id, b.block ? 'blocked' : 'active', b.block ? b.reason ?? 'Bloqueada pelo administrador' : null]);
+    if (!r.rowCount) throw Object.assign(new Error('Carteira não encontrada ou ainda não aprovada'), { status: 404 });
+    await audit({ actorId: req.user!.sub, tenantId: id, ip: req.ip, action: b.block ? 'wallet.blocked_admin' : 'wallet.unblocked_admin', meta: { reason: b.reason } }, c);
   });
   res.json({ ok: true });
 });
